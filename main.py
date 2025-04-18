@@ -1,39 +1,45 @@
-from flask import Flask, request
-import asyncio
 import os
-import requests
+import asyncio
+from flask import Flask, request
 from telegram import Bot, Update
-from telegram.constants import ParseMode
+from telegram.ext import Dispatcher, CommandHandler
+from dotenv import load_dotenv
+
+load_dotenv()
+
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 app = Flask(__name__)
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=TOKEN)
 
-# Webhook ayarlama fonksiyonu
-def set_telegram_webhook():
-    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', '')}/webhook"
-    if not webhook_url.startswith("https://"):
-        print("Webhook URL'si HTTPS ile başlamıyor, Render'da çalıştığından emin olun")
-        return
 
+# Asenkron mesaj işleme
+async def handle_message(chat_id, text):
+    await bot.send_message(chat_id=chat_id, text=f"Gelen mesaj: {text}")
+
+
+# Senkron ortamda async fonksiyon çalıştırıcı
+def run_async(func, *args, **kwargs):
     try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
-            json={
-                "url": webhook_url,
-                "drop_pending_updates": True,
-                "allowed_updates": ["message"]
-            }
-        )
-        print("Webhook ayarlandı:", response.json())
-    except Exception as e:
-        print(f"Webhook ayarlanırken hata oluştu: {e}")
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(func(*args, **kwargs))
+    else:
+        return asyncio.ensure_future(func(*args, **kwargs))
 
-# Tek endpoint: hem GET hem POST
+
+@app.route('/')
+def index():
+    return "Bot çalışıyor!", 200
+
+
 @app.route('/webhook', methods=['GET', 'POST'])
 def telegram_webhook():
     if request.method == 'GET':
-        return "Bu endpoint sadece Telegram sunucularından POST istekleri kabul eder", 200
+        return "Webhook aktif", 200
 
     try:
         update = Update.de_json(request.get_json(force=True), bot)
@@ -41,26 +47,16 @@ def telegram_webhook():
         if update.message:
             chat_id = update.message.chat.id
             text = update.message.text
-
-            asyncio.run(handle_message(chat_id, text))
+            run_async(handle_message, chat_id, text)
 
         return "OK", 200
     except Exception as e:
         print(f"Hata oluştu: {e}")
         return "Hata", 500
 
-# async mesaj işleyici
-async def handle_message(chat_id, text):
-    if text in ["/start", "/merhaba"]:
-        await bot.send_message(chat_id=chat_id, text="Merhaba! Artık Render'da çalışıyorum!")
-    elif text == "/yardim":
-        await bot.send_message(chat_id=chat_id, text="Render üzerinde çalışan botum. Desteklediğim komutlar: /merhaba, /yardim")
-    elif text == "/setwebhook" and str(chat_id) == os.environ.get("ADMIN_CHAT_ID", ""):
-        set_telegram_webhook()
-        await bot.send_message(chat_id=chat_id, text="Webhook yeniden ayarlandı!")
-    else:
-        await bot.send_message(chat_id=chat_id, text="Bu komutu anlamadım.")
 
-# Başlangıçta webhook'u ayarla
-with app.app_context():
-    set_telegram_webhook()
+# Webhook ayarlama (yalnızca deploy sırasında çalışır)
+if __name__ == "__main__":
+    bot.delete_webhook()
+    set_result = bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+    print("Webhook ayarlandı:", set_result)
