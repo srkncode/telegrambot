@@ -1,36 +1,51 @@
-import telebot
 import os
-from flask import Flask, request
-import threading
+import logging
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
+# Load environment variables
+load_dotenv()
 
-@app.route("/")
-def index():
-    return "Telegram botu çalışıyor!"
+# Enable logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Merhaba! Web servis üzerinden çalışıyorum.")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /start is issued."""
+    user = update.effective_user
+    await update.message.reply_html(
+        f"Merhaba {user.mention_html()}! Ben bir Telegram botuyum."
+    )
 
-@bot.message_handler(func=lambda message: True, content_types=['text'])
-def echo_message(message):
-    bot.reply_to(message, f"Sen dedin ki (web): {message.text}")
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /help is issued."""
+    await update.message.reply_text("Yardım için buradayım!")
 
-def run_flask():
-    app.run(host="0.0.0.0", port=80)
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Echo the user message."""
+    await update.message.reply_text(update.message.text)
 
-def run_bot():
-    bot.polling(none_stop=True)
+def main() -> None:
+    """Start the bot."""
+    # Get bot token from environment variable
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        logger.error("No bot token provided!")
+        return
 
-if __name__ == '__main__':
-    flask_thread = threading.Thread(target=run_flask)
-    bot_thread = threading.Thread(target=run_bot)
+    # Create the Application
+    application = Application.builder().token(token).build()
 
-    flask_thread.start()
-    bot_thread.start()
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    flask_thread.join()
-    bot_thread.join()
+    # Run the bot until the user presses Ctrl-C
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main() 
