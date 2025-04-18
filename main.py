@@ -48,6 +48,12 @@ async def webhook():
     if request.method == "POST":
         await application.update_queue.put(Update.de_json(request.get_json(force=True), application.bot))
         return "OK"
+    return "Webhook endpoint"
+
+def init_webhook(app_instance: Application, webhook_url: str) -> None:
+    """Initialize webhook settings."""
+    app_instance.bot.set_webhook(webhook_url + "/webhook")
+    logger.info(f"Webhook set to {webhook_url}/webhook")
 
 def main() -> None:
     """Start the bot."""
@@ -55,7 +61,7 @@ def main() -> None:
     
     # Get environment variables
     token = BOT_TOKEN  # Use the hardcoded token
-    port = int(os.getenv("PORT", 3000))
+    port = int(os.getenv("PORT", 10000))  # Default to port 10000
     
     if not token:
         logger.error("No bot token provided!")
@@ -69,7 +75,13 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
+    # Set webhook if RENDER_EXTERNAL_URL is provided
+    webhook_url = os.getenv("RENDER_EXTERNAL_URL")
+    if webhook_url:
+        init_webhook(application, webhook_url)
+    
     # Start Flask app
+    logger.info(f"Starting Flask app on port {port}")
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
