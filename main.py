@@ -1,42 +1,52 @@
 import logging
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler
+import asyncio
 
-# Logging ayarları
+# Logging
 logging.basicConfig(level=logging.INFO)
 
+# Flask uygulaması
 app = Flask(__name__)
 
-TOKEN = '8010269348:AAHz7SpGXCgXDaY4e46KFHgWJQDePInQAkI'
-WEBHOOK_URL = 'https://telegrambot-gp4i.onrender.com/webhook'
+# Telegram bot ayarları
+TOKEN = '8010269348:AAHz7SpGXCgXDaY4e46KFHgWJQDePInQAkI'  # ← kendi tokenını buraya koy
 
+# Telegram bot uygulamasını oluştur
 application = Application.builder().token(TOKEN).build()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Merhaba! Bot başarıyla çalışıyor 🚀")
+# /start komutu
+async def start(update: Update, context):
+    await update.message.reply_text("Merhaba! Bot çalışıyor 🎉")
 
-application.add_handler(CommandHandler('start', start))
+# Komut handler ekle
+application.add_handler(CommandHandler("start", start))
 
+# Webhook endpoint
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        json_str = request.get_data().decode('utf-8')
-        update = Update.de_json(json_str, application.bot)
-        application.process_update(update)
+        data = request.get_json(force=True)
+        update = Update.de_json(data, application.bot)
+        asyncio.run(application.process_update(update))
         return 'OK'
     except Exception as e:
         logging.error(f"Webhook işleme hatası: {e}")
         return 'Error', 500
 
-# 🔧 Webhook'u manuel olarak kurmak için
-@app.route('/setwebhook', methods=['GET'])
-def set_webhook():
-    success = application.bot.set_webhook(WEBHOOK_URL)
-    if success:
-        return f"✅ Webhook başarıyla ayarlandı: {WEBHOOK_URL}"
-    else:
-        return "❌ Webhook ayarlanamadı"
+# Test için root endpoint
+@app.route('/')
+def index():
+    return "Bot çalışıyor! ✅"
 
+# Uygulama başlatıldığında webhook ayarla
 if __name__ == '__main__':
+    from telegram import Bot
+
+    bot = Bot(token=TOKEN)
+    webhook_url = "https://telegrambot-gp4i.onrender.com/webhook"  # kendi Render URL'ine göre değiştir
+    asyncio.run(bot.set_webhook(webhook_url))
+    logging.info("Webhook ayarlandı: " + webhook_url)
+
     app.run(host='0.0.0.0', port=10000)
