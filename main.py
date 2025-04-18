@@ -27,7 +27,7 @@ def set_telegram_webhook():
     except Exception as e:
         print(f"Webhook ayarlanırken hata oluştu: {e}")
 
-# Telegram'dan gelen mesajları işleyen endpoint
+# Tüm istek türleri için tek endpoint
 @app.route('/webhook', methods=['GET', 'POST'])
 def telegram_webhook():
     if request.method == 'GET':
@@ -53,6 +53,6 @@ def telegram_webhook():
         print(f"Hata oluştu: {e}")
         return "Hata", 500
 
-# Otomatik webhook ayarı (Render'da çalışırken)
+# Uygulama başlarken webhook'u ayarla
 with app.app_context():
     set_telegram_webhook()
