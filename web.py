@@ -1,27 +1,23 @@
 from flask import Flask
-import threading  # Threading'i import etmeyi unutmayın
+import threading
+import subprocess
 import os
-import time
 
 app = Flask(__name__)
+
+# Ana bot dosyasını başlat
+def run_bot():
+    subprocess.call(["python", "main.py"])
 
 @app.route('/')
 def home():
     return "Telegram Bot çalışıyor!"
 
-@app.route('/health')
-def health():
-    return {"status": "up"}
+# Bot'u ayrı bir thread'de başlat
+bot_thread = threading.Thread(target=run_bot)
+bot_thread.daemon = True
+bot_thread.start()
 
 if __name__ == "__main__":
-    # Bot'u import et
-    import main
-    
-    # Bot'u ayrı bir thread'de başlat
-    bot_thread = threading.Thread(target=main.run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # Flask uygulamasını çalıştır
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
