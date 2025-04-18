@@ -2,7 +2,6 @@ import os
 import asyncio
 from flask import Flask, request
 from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,7 +18,7 @@ async def handle_message(chat_id, text):
     await bot.send_message(chat_id=chat_id, text=f"Gelen mesaj: {text}")
 
 
-# Senkron ortamda async fonksiyon çalıştırıcı
+# Senkron ortamda async çalıştırma
 def run_async(func, *args, **kwargs):
     try:
         loop = asyncio.get_running_loop()
@@ -55,7 +54,6 @@ def telegram_webhook():
         return "Hata", 500
 
 
-# Webhook ayarlama (yalnızca deploy sırasında çalışır)
 if __name__ == "__main__":
     bot.delete_webhook()
     set_result = bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
