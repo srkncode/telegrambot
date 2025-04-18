@@ -57,7 +57,10 @@ def home():
     return "Telegram Bot Render'da Çalışıyor!"
 
 if __name__ == '__main__':
-    # Uygulama başlarken webhook'u ayarla (sadece Render ortamında)
+    # Sadece Render'da çalışırken webhook'u ayarla
     if os.environ.get('RENDER'):
-        set_telegram_webhook()
+        WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
+                    json={"url": WEBHOOK_URL})
+    
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
