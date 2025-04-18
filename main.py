@@ -1,6 +1,6 @@
 import logging
 from flask import Flask, request
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler
 import asyncio
 
@@ -29,7 +29,8 @@ def webhook():
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, application.bot)
-        asyncio.run(application.process_update(update))
+        # asyncio.create_task kullanarak asenkron olarak işlem yapıyoruz
+        asyncio.create_task(application.process_update(update))
         return 'OK'
     except Exception as e:
         logging.error(f"Webhook işleme hatası: {e}")
@@ -42,11 +43,13 @@ def index():
 
 # Uygulama başlatıldığında webhook ayarla
 if __name__ == '__main__':
-    from telegram import Bot
-
+    # Bot instance'ını oluştur
     bot = Bot(token=TOKEN)
+    # Webhook URL'ini ayarla
     webhook_url = "https://telegrambot-gp4i.onrender.com/webhook"  # kendi Render URL'ine göre değiştir
+    # Webhook'u ayarla
     asyncio.run(bot.set_webhook(webhook_url))
     logging.info("Webhook ayarlandı: " + webhook_url)
 
+    # Flask uygulamasını başlat
     app.run(host='0.0.0.0', port=10000)
