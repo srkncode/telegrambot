@@ -1,3 +1,18 @@
+from flask import Flask
+import threading  # Threading'i import etmeyi unutmayın
+import os
+import time
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Telegram Bot çalışıyor!"
+
+@app.route('/health')
+def health():
+    return {"status": "up"}
+
 if __name__ == "__main__":
     # Bot'u import et
     import main
