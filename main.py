@@ -1,11 +1,13 @@
 from flask import Flask, request
-import telegram
+import asyncio
 import os
 import requests
+from telegram import Bot, Update
+from telegram.constants import ParseMode
 
 app = Flask(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-bot = telegram.Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 
 # Webhook ayarlama fonksiyonu
 def set_telegram_webhook():
@@ -27,32 +29,38 @@ def set_telegram_webhook():
     except Exception as e:
         print(f"Webhook ayarlanırken hata oluştu: {e}")
 
-# Tüm istek türleri için tek endpoint
+# Tek endpoint: hem GET hem POST
 @app.route('/webhook', methods=['GET', 'POST'])
 def telegram_webhook():
     if request.method == 'GET':
         return "Bu endpoint sadece Telegram sunucularından POST istekleri kabul eder", 200
 
     try:
-        update = telegram.Update.de_json(request.get_json(), bot)
+        update = Update.de_json(request.get_json(force=True), bot)
+
         if update.message:
-            chat_id = update.message.chat_id
+            chat_id = update.message.chat.id
             text = update.message.text
 
-            if text == "/start" or text == "/merhaba":
-                bot.send_message(chat_id=chat_id, text="Merhaba! Artık Render'da çalışıyorum!")
-            elif text == "/yardim":
-                bot.send_message(chat_id=chat_id, text="Render üzerinde çalışan botum. Desteklediğim komutlar: /merhaba, /yardim")
-            elif text == "/setwebhook" and str(chat_id) == os.environ.get("ADMIN_CHAT_ID", ""):
-                set_telegram_webhook()
-                bot.send_message(chat_id=chat_id, text="Webhook yeniden ayarlandı!")
-            else:
-                bot.send_message(chat_id=chat_id, text="Bu komutu anlamadım.")
+            asyncio.run(handle_message(chat_id, text))
+
         return "OK", 200
     except Exception as e:
         print(f"Hata oluştu: {e}")
         return "Hata", 500
 
-# Uygulama başlarken webhook'u ayarla
+# async mesaj işleyici
+async def handle_message(chat_id, text):
+    if text in ["/start", "/merhaba"]:
+        await bot.send_message(chat_id=chat_id, text="Merhaba! Artık Render'da çalışıyorum!")
+    elif text == "/yardim":
+        await bot.send_message(chat_id=chat_id, text="Render üzerinde çalışan botum. Desteklediğim komutlar: /merhaba, /yardim")
+    elif text == "/setwebhook" and str(chat_id) == os.environ.get("ADMIN_CHAT_ID", ""):
+        set_telegram_webhook()
+        await bot.send_message(chat_id=chat_id, text="Webhook yeniden ayarlandı!")
+    else:
+        await bot.send_message(chat_id=chat_id, text="Bu komutu anlamadım.")
+
+# Başlangıçta webhook'u ayarla
 with app.app_context():
     set_telegram_webhook()
