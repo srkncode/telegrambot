@@ -52,15 +52,17 @@ def telegram_webhook():
             return "Hata", 500
     return "OK", 200
 
-@app.route('/')
-def home():
-    return "Telegram Bot Render'da Çalışıyor!"
-
-if __name__ == '__main__':
-    # Sadece Render'da çalışırken webhook'u ayarla
-    if os.environ.get('RENDER'):
-        WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook",
-                    json={"url": WEBHOOK_URL})
+@app.route('/webhook', methods=['GET', 'POST'])
+def telegram_webhook():
+    if request.method == 'GET':
+        # Tarayıcı isteklerine özel yanıt
+        return "Bu endpoint sadece Telegram sunucularından POST istekleri kabul eder", 200
     
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    # POST isteklerini işleme (mevcut kodunuz)
+    try:
+        update = telegram.Update.de_json(request.get_json(), bot)
+        # ... mevcut mesaj işleme kodunuz ...
+        return "OK", 200
+    except Exception as e:
+        print(f"Hata: {e}")
+        return "Hata", 500
