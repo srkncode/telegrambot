@@ -1,9 +1,11 @@
 import os
 import logging
+import asyncio
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from flask import Flask, request
+from functools import partial
 
 # Load environment variables
 load_dotenv()
@@ -43,29 +45,36 @@ def index():
     return "Bot çalışıyor!"
 
 @app.route("/webhook", methods=["POST"])
-async def webhook():
+def webhook():
     """Handle incoming webhook updates."""
     if request.method == "POST":
-        await application.update_queue.put(Update.de_json(request.get_json(force=True), application.bot))
+        # Get the update data
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        
+        # Create an async function to process the update
+        async def process_update():
+            await application.process_update(update)
+        
+        # Run the async function
+        asyncio.run(process_update())
         return "OK"
     return "Webhook endpoint"
 
-def init_webhook(app_instance: Application, webhook_url: str) -> None:
+async def init_webhook(app_instance: Application, webhook_url: str) -> None:
     """Initialize webhook settings."""
-    app_instance.bot.set_webhook(webhook_url + "/webhook")
+    await app_instance.bot.set_webhook(webhook_url + "/webhook")
     logger.info(f"Webhook set to {webhook_url}/webhook")
 
-def main() -> None:
-    """Start the bot."""
+async def setup_application():
+    """Setup the bot application."""
     global application
     
     # Get environment variables
-    token = BOT_TOKEN  # Use the hardcoded token
-    port = int(os.getenv("PORT", 10000))  # Default to port 10000
+    token = BOT_TOKEN
     
     if not token:
         logger.error("No bot token provided!")
-        return
+        return None
 
     # Create the Application
     application = Application.builder().token(token).build()
@@ -78,7 +87,17 @@ def main() -> None:
     # Set webhook if RENDER_EXTERNAL_URL is provided
     webhook_url = os.getenv("RENDER_EXTERNAL_URL")
     if webhook_url:
-        init_webhook(application, webhook_url)
+        await init_webhook(application, webhook_url)
+    
+    return application
+
+def main() -> None:
+    """Start the bot."""
+    # Setup the application
+    asyncio.run(setup_application())
+    
+    # Get port
+    port = int(os.getenv("PORT", 10000))
     
     # Start Flask app
     logger.info(f"Starting Flask app on port {port}")
