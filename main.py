@@ -2,9 +2,8 @@ import os
 import ipaddress
 from functools import wraps
 from flask import Flask, request, abort
-import telegram
-from telegram import Update
-from telegram.ext import Updater, MessageHandler, Filters
+from telegram import Bot, Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
 app = Flask(__name__)
 
@@ -14,8 +13,9 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "default_secret_change_me")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 
 # Initialize bot
-bot = telegram.Bot(token=BOT_TOKEN)
-updater = Updater(token=BOT_TOKEN, use_context=True)
+bot = Bot(token=BOT_TOKEN)
+updater = Updater(bot=bot, use_context=True)
+dispatcher = updater.dispatcher
 
 # Decorator for IP whitelisting
 def telegram_ip_required(f):
@@ -61,35 +61,31 @@ def webhook():
 
     try:
         update = Update.de_json(request.get_json(force=True), bot)
-        dispatcher = updater.dispatcher
         dispatcher.process_update(update)
         return "OK", 200
     except Exception as e:
         app.logger.error(f"Error processing update: {str(e)}")
         return "Internal Server Error", 500
 
-def handle_message(update, context):
-    message = update.message
-    chat_id = message.chat_id
-    text = message.text or ""
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("Merhaba! Ben Render'da çalışan bir botum 🤖")
 
-    if str(chat_id) == ADMIN_CHAT_ID and text == "/restart":
+def help_command(update: Update, context: CallbackContext):
+    update.message.reply_text("Desteklenen komutlar:\n/start - Botu başlat\n/yardim - Yardım menüsü")
+
+def merhaba(update: Update, context: CallbackContext):
+    update.message.reply_text("Selam! Nasılsın? 😊")
+
+def restart(update: Update, context: CallbackContext):
+    if str(update.message.chat_id) == ADMIN_CHAT_ID:
         initialize_webhook()
-        context.bot.send_message(chat_id=chat_id, text="🔄 Webhook yeniden ayarlandı")
-        return
-
-    responses = {
-        "/start": "Merhaba! Ben Render'da çalışan bir botum 🤖",
-        "/yardim": "Desteklenen komutlar:\n/start - Botu başlat\n/yardim - Yardım menüsü",
-        "/merhaba": "Selam! Nasılsın? 😊"
-    }
-
-    response = responses.get(text.lower(), "Üzgünüm, bu komutu anlamadım 🤔")
-    context.bot.send_message(chat_id=chat_id, text=response)
+        update.message.reply_text("🔄 Webhook yeniden ayarlandı")
 
 # Handlers
-dispatcher = updater.dispatcher
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("yardim", help_command))
+dispatcher.add_handler(CommandHandler("merhaba", merhaba))
+dispatcher.add_handler(CommandHandler("restart", restart))
 
 if __name__ == '__main__':
     if os.environ.get('RENDER'):
