@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot token'ını buraya ekleyin
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "BURAYA_BOT_TOKEN_EKLE")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8010269348:AAHz7SpGXCgXDaY4e46KFHgWJQDePInQAkI")
 
 # News API için API anahtarı (https://newsapi.org/ adresinden ücretsiz alabilirsiniz)
 NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "BURAYA_NEWS_API_KEY_EKLE")
