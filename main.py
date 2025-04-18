@@ -1,16 +1,14 @@
 import json
 import os
 import telegram
-import functions_framework
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Ortam değişkenini al
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telegram.Bot(token=BOT_TOKEN)
 
-@functions_framework.http
 def telegram_webhook(request):
     if request.method == 'POST':
         try:
-            update = telegram.Update.de_json(request.get_json(), bot)
+            update = telegram.Update.de_json(json.loads(request.data.decode('utf-8')), bot)
             if update.message:
                 chat_id = update.message.chat_id
                 text = update.message.text
