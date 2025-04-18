@@ -55,14 +55,24 @@ def telegram_webhook():
 @app.route('/webhook', methods=['GET', 'POST'])
 def telegram_webhook():
     if request.method == 'GET':
-        # Tarayıcı isteklerine özel yanıt
         return "Bu endpoint sadece Telegram sunucularından POST istekleri kabul eder", 200
-    
-    # POST isteklerini işleme (mevcut kodunuz)
+
     try:
         update = telegram.Update.de_json(request.get_json(), bot)
-        # ... mevcut mesaj işleme kodunuz ...
+        if update.message:
+            chat_id = update.message.chat_id
+            text = update.message.text
+
+            if text == "/start" or text == "/merhaba":
+                bot.send_message(chat_id=chat_id, text="Merhaba! Artık Render'da çalışıyorum!")
+            elif text == "/yardim":
+                bot.send_message(chat_id=chat_id, text="Render üzerinde çalışan botum. Desteklediğim komutlar: /merhaba, /yardim")
+            elif text == "/setwebhook" and str(chat_id) == os.environ.get("ADMIN_CHAT_ID", ""):
+                set_telegram_webhook()
+                bot.send_message(chat_id=chat_id, text="Webhook yeniden ayarlandı!")
+            else:
+                bot.send_message(chat_id=chat_id, text="Bu komutu anlamadım.")
         return "OK", 200
     except Exception as e:
-        print(f"Hata: {e}")
+        print(f"Hata oluştu: {e}")
         return "Hata", 500
