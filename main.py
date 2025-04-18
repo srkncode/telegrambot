@@ -5,7 +5,10 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from flask import Flask, request
-from functools import partial
+import nest_asyncio
+
+# Enable nested asyncio support
+nest_asyncio.apply()
 
 # Load environment variables
 load_dotenv()
@@ -19,11 +22,15 @@ logger = logging.getLogger(__name__)
 # Flask app
 app = Flask(__name__)
 
-# Global variable for the bot application
-application = None
-
 # Bot Token
 BOT_TOKEN = "8010269348:AAHz7SpGXCgXDaY4e46KFHgWJQDePInQAkI"
+
+# Create event loop
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+# Create the Application
+application = Application.builder().token(BOT_TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
@@ -48,37 +55,23 @@ def index():
 def webhook():
     """Handle incoming webhook updates."""
     if request.method == "POST":
-        # Get the update data
         update = Update.de_json(request.get_json(force=True), application.bot)
         
-        # Create an async function to process the update
         async def process_update():
+            await application.initialize()
             await application.process_update(update)
         
-        # Run the async function
-        asyncio.run(process_update())
+        loop.run_until_complete(process_update())
         return "OK"
     return "Webhook endpoint"
 
-async def init_webhook(app_instance: Application, webhook_url: str) -> None:
+async def init_webhook(url: str) -> None:
     """Initialize webhook settings."""
-    await app_instance.bot.set_webhook(webhook_url + "/webhook")
-    logger.info(f"Webhook set to {webhook_url}/webhook")
+    await application.bot.set_webhook(url + "/webhook")
+    logger.info(f"Webhook set to {url}/webhook")
 
-async def setup_application():
+async def setup():
     """Setup the bot application."""
-    global application
-    
-    # Get environment variables
-    token = BOT_TOKEN
-    
-    if not token:
-        logger.error("No bot token provided!")
-        return None
-
-    # Create the Application
-    application = Application.builder().token(token).build()
-
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
@@ -87,21 +80,26 @@ async def setup_application():
     # Set webhook if RENDER_EXTERNAL_URL is provided
     webhook_url = os.getenv("RENDER_EXTERNAL_URL")
     if webhook_url:
-        await init_webhook(application, webhook_url)
+        await init_webhook(webhook_url)
     
-    return application
+    await application.initialize()
+    logger.info("Bot application initialized successfully")
 
 def main() -> None:
     """Start the bot."""
-    # Setup the application
-    asyncio.run(setup_application())
-    
-    # Get port
-    port = int(os.getenv("PORT", 10000))
-    
-    # Start Flask app
-    logger.info(f"Starting Flask app on port {port}")
-    app.run(host="0.0.0.0", port=port)
+    try:
+        # Setup the application
+        loop.run_until_complete(setup())
+        
+        # Get port
+        port = int(os.getenv("PORT", 10000))
+        
+        # Start Flask app
+        logger.info(f"Starting Flask app on port {port}")
+        app.run(host="0.0.0.0", port=port)
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        raise
 
 if __name__ == "__main__":
     main() 
