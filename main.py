@@ -1,21 +1,23 @@
 import logging
+import os
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, ContextTypes
 from requests.adapters import HTTPAdapter
 from urllib3 import PoolManager
 
 # Flask uygulaması
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
-# Telegram bot ayarları
-TOKEN = 'YOUR_BOT_TOKEN'  # Telegram bot tokenınızı buraya ekleyin
+# Ortam değişkenlerinden token'ı al (Render için)
+TOKEN = os.getenv('BOT_TOKEN')  # Render'da BOT_TOKEN olarak ayarlanmalı
 
 # Telegram bot için özel bağlantı havuzu sınıfı
 class CustomAdapter(HTTPAdapter):
     def __init__(self, *args, **kwargs):
-        self.pool_connections = 10  # Bağlantı sayısını artır
-        self.pool_maxsize = 10      # Maksimum bağlantı sayısını artır
+        self.pool_connections = 10
+        self.pool_maxsize = 10
         super().__init__(*args, **kwargs)
 
 # Telegram bot uygulaması ve session için adapter ayarı
@@ -23,29 +25,36 @@ application = Application.builder().token(TOKEN).build()
 application.bot.session.mount('https://', CustomAdapter())
 application.bot.session.mount('http://', CustomAdapter())
 
-# Webhook'u ayarlama
+# Webhook endpoint
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        json_str = request.get_data().decode('UTF-8')
+        json_str = request.get_data().decode('utf-8')
         update = Update.de_json(json_str, application.bot)
-        application.process_update(update)
+        application.create_task(application.process_update(update))
         return 'OK'
     except Exception as e:
         logging.error(f"Webhook işleme hatası: {e}")
         return 'Error', 500
 
-# Basit bir komut örneği
-async def start(update: Update, context):
+# /start komutu
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Merhaba! Benim botum!")
 
-# Komut handler'ını oluştur
-start_handler = CommandHandler('start', start)
-application.add_handler(start_handler)
+# Komut handler
+application.add_handler(CommandHandler("start", start))
 
-# Uygulama başlatma
+# Ana uygulama
 if __name__ == '__main__':
-    # Webhook için URL'yi Telegram API'ye ayarlıyoruz
-    application.bot.set_webhook("https://yourdomain.com/webhook")  # Webhook URL'sini kendi domain adresinizle değiştirin
-    logging.info("Webhook ayarlandı ve bot çalışıyor!")
-    app.run(host='0.0.0.0', port=10000)
+    # Webhook adresini dinamik olarak al (Render dışarıdan erişebilsin)
+    RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')  # Render'da tanımlanmalı
+    if not RENDER_EXTERNAL_URL:
+        raise Exception("RENDER_EXTERNAL_URL ortam değişkeni tanımlı değil!")
+
+    # Webhook'u ayarla
+    webhook_url = f"https://{RENDER_EXTERNAL_URL}/webhook"
+    application.bot.set_webhook(url=webhook_url)
+    logging.info(f"Webhook ayarlandı: {webhook_url}")
+
+    # Flask servisini başlat
+    app.run(host="0.0.0.0", port=10000)
