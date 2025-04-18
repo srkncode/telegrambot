@@ -1,42 +1,51 @@
 import logging
+from flask import Flask, request
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, Dispatcher
-import os
+from telegram.ext import Application, CommandHandler
+from requests.adapters import HTTPAdapter
+from urllib3 import PoolManager
 
-# Bot Token ve Webhook URL'yi environment'dan al
-TOKEN = os.getenv("TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# Flask uygulaması
+app = Flask(__name__)
 
-# Botu başlat
-updater = Updater(token=TOKEN, use_context=True)
-dispatcher = updater.dispatcher
+# Telegram bot ayarları
+TOKEN = 'YOUR_BOT_TOKEN'  # Telegram bot tokenınızı buraya ekleyin
 
-# Webhook'ı sil ve yeniden kur
-def setup_webhook():
-    bot = updater.bot
-    # Önceki webhook'ı sil
-    bot.delete_webhook()
-    # Yeni webhook'ı kur
-    set_result = bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-    print("Webhook ayarlandı:", set_result)
+# Telegram bot için özel bağlantı havuzu sınıfı
+class CustomAdapter(HTTPAdapter):
+    def __init__(self, *args, **kwargs):
+        self.pool_connections = 10  # Bağlantı sayısını artır
+        self.pool_maxsize = 10      # Maksimum bağlantı sayısını artır
+        super().__init__(*args, **kwargs)
 
-# Komutları tanımla
-def start(update: Update, context):
-    chat_id = update.message.chat_id
-    context.bot.send_message(chat_id=chat_id, text="Merhaba! Bot çalışıyor!")
+# Telegram bot uygulaması ve session için adapter ayarı
+application = Application.builder().token(TOKEN).build()
+application.bot.session.mount('https://', CustomAdapter())
+application.bot.session.mount('http://', CustomAdapter())
 
-# Main fonksiyon
-def main():
-    # Webhook'u ayarla
-    setup_webhook()
+# Webhook'u ayarlama
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        json_str = request.get_data().decode('UTF-8')
+        update = Update.de_json(json_str, application.bot)
+        application.process_update(update)
+        return 'OK'
+    except Exception as e:
+        logging.error(f"Webhook işleme hatası: {e}")
+        return 'Error', 500
 
-    # Komutları işleme
-    start_handler = CommandHandler('start', start)
-    dispatcher.add_handler(start_handler)
+# Basit bir komut örneği
+async def start(update: Update, context):
+    await update.message.reply_text("Merhaba! Benim botum!")
 
-    # Webhook endpointini başlat
-    updater.start_webhook(listen="0.0.0.0", port=10000, url_path='webhook')
-    updater.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+# Komut handler'ını oluştur
+start_handler = CommandHandler('start', start)
+application.add_handler(start_handler)
 
-if __name__ == "__main__":
-    main()
+# Uygulama başlatma
+if __name__ == '__main__':
+    # Webhook için URL'yi Telegram API'ye ayarlıyoruz
+    application.bot.set_webhook("https://yourdomain.com/webhook")  # Webhook URL'sini kendi domain adresinizle değiştirin
+    logging.info("Webhook ayarlandı ve bot çalışıyor!")
+    app.run(host='0.0.0.0', port=10000)
