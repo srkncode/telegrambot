@@ -45,7 +45,6 @@ def webhook():
 
 # Uygulama başlangıcı
 if __name__ == '__main__':
-    # Render domainini kendi adresinle değiştir:
-    application.bot.set_webhook("https://telegrambot-abc123.onrender.com/webhook")
+    application.bot.set_webhook("https://telegrambot-gp4i.onrender.com/webhook")
     logging.info("Webhook ayarlandı ✅")
     app.run(host='0.0.0.0', port=10000)
