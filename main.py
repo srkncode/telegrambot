@@ -1,6 +1,8 @@
 import os
 import logging
 import asyncio
+import requests
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -49,6 +51,110 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
     await update.message.reply_text(update.message.text)
 
+async def get_weather(city: str) -> dict:
+    """Get current weather data for a city."""
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    base_url = "http://api.openweathermap.org/data/2.5/weather"
+    params = {
+        "q": f"{city},TR",  # Add TR for Turkey
+        "appid": api_key,
+        "units": "metric",
+        "lang": "tr"
+    }
+    response = requests.get(base_url, params=params)
+    return response.json()
+
+async def get_forecast(city: str) -> dict:
+    """Get 5-day weather forecast for a city."""
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    base_url = "http://api.openweathermap.org/data/2.5/forecast"
+    params = {
+        "q": f"{city},TR",  # Add TR for Turkey
+        "appid": api_key,
+        "units": "metric",
+        "lang": "tr"
+    }
+    response = requests.get(base_url, params=params)
+    return response.json()
+
+async def hava(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send current weather information for a Turkish city."""
+    if not context.args:
+        await update.message.reply_text("Lütfen bir şehir adı girin. Örnek: /hava Istanbul")
+        return
+
+    city = " ".join(context.args)
+    try:
+        weather_data = await get_weather(city)
+        if weather_data["cod"] != 200:
+            await update.message.reply_text("Şehir bulunamadı. Lütfen Türkiye'deki bir şehir adı girin.")
+            return
+
+        temp = weather_data["main"]["temp"]
+        feels_like = weather_data["main"]["feels_like"]
+        temp_min = weather_data["main"]["temp_min"]
+        temp_max = weather_data["main"]["temp_max"]
+        humidity = weather_data["main"]["humidity"]
+        description = weather_data["weather"][0]["description"].capitalize()
+        
+        message = (
+            f"🌤️ {city} için anlık hava durumu:\n\n"
+            f"🌡️ Sıcaklık: {temp}°C\n"
+            f"🤔 Hissedilen: {feels_like}°C\n"
+            f"⬆️ En yüksek: {temp_max}°C\n"
+            f"⬇️ En düşük: {temp_min}°C\n"
+            f"💧 Nem: {humidity}%\n"
+            f"📝 Durum: {description}"
+        )
+        
+        await update.message.reply_text(message)
+    except Exception as e:
+        logger.error(f"Weather error: {e}")
+        await update.message.reply_text("Hava durumu bilgisi alınırken bir hata oluştu.")
+
+async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send 5-day weather forecast for a Turkish city."""
+    if not context.args:
+        await update.message.reply_text("Lütfen bir şehir adı girin. Örnek: /tahmin Istanbul")
+        return
+
+    city = " ".join(context.args)
+    try:
+        forecast_data = await get_forecast(city)
+        if forecast_data["cod"] != "200":
+            await update.message.reply_text("Şehir bulunamadı. Lütfen Türkiye'deki bir şehir adı girin.")
+            return
+
+        message = f"🌤️ {city} için 5 günlük hava tahmini:\n\n"
+        
+        # Group forecasts by day
+        daily_forecasts = {}
+        for item in forecast_data["list"]:
+            date = datetime.fromtimestamp(item["dt"]).strftime("%d.%m.%Y")
+            if date not in daily_forecasts:
+                daily_forecasts[date] = {
+                    "temp_min": float('inf'),
+                    "temp_max": float('-inf'),
+                    "description": item["weather"][0]["description"]
+                }
+            
+            temp = item["main"]["temp"]
+            daily_forecasts[date]["temp_min"] = min(daily_forecasts[date]["temp_min"], temp)
+            daily_forecasts[date]["temp_max"] = max(daily_forecasts[date]["temp_max"], temp)
+
+        for date, data in daily_forecasts.items():
+            message += (
+                f"📅 {date}:\n"
+                f"⬆️ En yüksek: {data['temp_max']}°C\n"
+                f"⬇️ En düşük: {data['temp_min']}°C\n"
+                f"📝 Durum: {data['description'].capitalize()}\n\n"
+            )
+        
+        await update.message.reply_text(message)
+    except Exception as e:
+        logger.error(f"Forecast error: {e}")
+        await update.message.reply_text("Hava tahmini alınırken bir hata oluştu.")
+
 @app.route("/", methods=["GET"])
 def index():
     return "Bot çalışıyor!"
@@ -77,6 +183,8 @@ async def setup():
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("hava", hava))
+    application.add_handler(CommandHandler("tahmin", tahmin))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     # Set webhook if RENDER_EXTERNAL_URL is provided
