@@ -22,8 +22,10 @@ logger = logging.getLogger(__name__)
 # Flask app
 app = Flask(__name__)
 
-# Bot Token
-BOT_TOKEN = "8010269348:AAHz7SpGXCgXDaY4e46KFHgWJQDePInQAkI"
+# Bot Token from environment variable
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is not set!")
 
 # Create event loop
 loop = asyncio.new_event_loop()
