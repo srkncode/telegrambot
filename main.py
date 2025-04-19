@@ -321,7 +321,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle incoming messages."""
     text = update.message.text.lower().strip()
     
-    if text.startswith("hava "):
+    if text.startswith("doviz"):
+        await doviz(update, context)
+    elif text.startswith("altin"):
+        await altin(update, context)
+    elif text.startswith("hava"):
         # Remove "hava " prefix and process as weather command
         city = text[5:].strip()
         await hava(update, context, city)
@@ -329,10 +333,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Echo other messages
         await update.message.reply_text(
             "Kullanabileceğiniz komutlar:\n\n"
-            "💰 /doviz - Döviz kurları\n"
-            "🥇 /altin - Altın fiyatları\n"
-            "🌤️ /hava [şehir] - Hava durumu\n"
-            "❓ /yardim - Yardım menüsü"
+            "💰 doviz - Döviz kurları\n"
+            "🥇 altin - Altın fiyatları\n"
+            "🌤️ hava [şehir] - Hava durumu\n"
+            "❓ yardim - Yardım menüsü"
         )
 
 @app.route("/", methods=["GET"])
