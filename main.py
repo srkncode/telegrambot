@@ -10,6 +10,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from flask import Flask, request
 import nest_asyncio
 import pandas as pd
+import json
+from bs4 import BeautifulSoup
 
 # Enable nested asyncio support
 nest_asyncio.apply()
@@ -42,28 +44,28 @@ application = Application.builder().token(BOT_TOKEN).build()
 stock_cache = {}
 CACHE_DURATION = 300  # 5 minutes
 
-# BIST symbol mappings for special cases
+# BIST symbol mappings for Investing.com
 BIST_SYMBOL_MAPPINGS = {
-    'HEKTS': 'HEKTS.IS',  # Halk Enerji
-    'SASA': 'SASA.IS',    # Sasa
-    'KCHOL': 'KCHOL.IS',  # Koç Holding
-    'GARAN': 'GARAN.IS',  # Garanti Bankası
-    'AKBNK': 'AKBNK.IS',  # Akbank
-    'ISCTR': 'ISCTR.IS',  # İş Bankası
-    'THYAO': 'THYAO.IS',  # Türk Hava Yolları
-    'EREGL': 'EREGL.IS',  # Ereğli Demir Çelik
-    'TUPRS': 'TUPRS.IS',  # Tüpraş
-    'ASELS': 'ASELS.IS',  # Aselsan
-    'KRDMD': 'KRDMD.IS',  # Kardemir
-    'PETKM': 'PETKM.IS',  # Petkim
-    'TCELL': 'TCELL.IS',  # Turkcell
-    'VESTL': 'VESTL.IS',  # Vestel
-    'BIMAS': 'BIMAS.IS',  # BİM
-    'MGROS': 'MGROS.IS',  # Migros
-    'ARCLK': 'ARCLK.IS',  # Arçelik
-    'FROTO': 'FROTO.IS',  # Ford Otosan
-    'ULKER': 'ULKER.IS',  # Ülker
-    'PGSUS': 'PGSUS.IS',  # Pegasus
+    'HEKTS': 'halk-enerji',  # Halk Enerji
+    'SASA': 'sasa-polyester',  # Sasa
+    'KCHOL': 'koc-holding',  # Koç Holding
+    'GARAN': 'garanti-bankasi',  # Garanti Bankası
+    'AKBNK': 'akbank',  # Akbank
+    'ISCTR': 'is-bankasi',  # İş Bankası
+    'THYAO': 'turk-hava-yollari',  # Türk Hava Yolları
+    'EREGL': 'eregli-demir-celik',  # Ereğli Demir Çelik
+    'TUPRS': 'tupras',  # Tüpraş
+    'ASELS': 'aselsan',  # Aselsan
+    'KRDMD': 'kardemir',  # Kardemir
+    'PETKM': 'petkim',  # Petkim
+    'TCELL': 'turkcell',  # Turkcell
+    'VESTL': 'vestel',  # Vestel
+    'BIMAS': 'bim',  # BİM
+    'MGROS': 'migros',  # Migros
+    'ARCLK': 'arcelik',  # Arçelik
+    'FROTO': 'ford-otosan',  # Ford Otosan
+    'ULKER': 'ulker',  # Ülker
+    'PGSUS': 'pegasus',  # Pegasus
 }
 
 def validate_bist_symbol(symbol: str) -> str:
@@ -81,7 +83,7 @@ def validate_bist_symbol(symbol: str) -> str:
     if len(symbol) < 3 or len(symbol) > 5:
         raise ValueError("Hisse senedi sembolü 3-5 karakter uzunluğunda olmalıdır.")
     
-    return f"{symbol}.IS"
+    raise ValueError(f"Hisse senedi bulunamadı: {symbol}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
@@ -243,51 +245,60 @@ async def get_bist_data(symbol: str) -> dict:
         # Validate and format symbol
         formatted_symbol = validate_bist_symbol(symbol)
         
-        # BIST API endpoints
-        base_url = "https://www.borsaistanbul.com/api"
+        # Investing.com API endpoints
+        base_url = "https://www.investing.com/equities"
         
         # Get current price
-        price_url = f"{base_url}/marketdata/equity/{formatted_symbol}"
+        price_url = f"{base_url}/{formatted_symbol}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
         }
         
         price_response = requests.get(price_url, headers=headers)
-        if price_response.status_code == 404:
-            raise ValueError(f"Hisse senedi bulunamadı: {symbol}")
-        elif price_response.status_code != 200:
+        if price_response.status_code != 200:
             raise ValueError(f"Price API returned status code {price_response.status_code}")
             
-        price_data = price_response.json()
-        if not price_data or 'data' not in price_data:
-            raise ValueError("No price data received")
-            
+        # Parse HTML response
+        soup = BeautifulSoup(price_response.text, 'html.parser')
+        
+        # Get current price
+        current_price = float(soup.find('span', {'class': 'text-2xl'}).text.replace(',', '.'))
+        
+        # Get previous close
+        previous_close = float(soup.find('div', {'class': 'flex flex-wrap gap-x-4 gap-y-2'})
+                             .find_all('span')[1].text.replace(',', '.'))
+        
+        # Calculate change percent
+        change_percent = ((current_price - previous_close) / previous_close) * 100
+        
         # Get historical data
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=60)  # Get 60 days of data for better averages
+        hist_url = f"{base_url}/{formatted_symbol}-historical-data"
+        hist_response = requests.get(hist_url, headers=headers)
         
-        hist_url = f"{base_url}/marketdata/equity/{formatted_symbol}/historical"
-        params = {
-            "startDate": start_date.strftime("%Y-%m-%d"),
-            "endDate": end_date.strftime("%Y-%m-%d")
-        }
-        
-        hist_response = requests.get(hist_url, headers=headers, params=params)
         if hist_response.status_code != 200:
             raise ValueError(f"Historical API returned status code {hist_response.status_code}")
             
-        hist_data = hist_response.json()
-        if not hist_data or 'data' not in hist_data:
-            raise ValueError("No historical data received")
-            
-        # Process current data
-        current_price = float(price_data['data']['last'])
-        previous_close = float(price_data['data']['previousClose'])
-        change_percent = float(price_data['data']['changePercent'])
+        # Parse historical data
+        hist_soup = BeautifulSoup(hist_response.text, 'html.parser')
+        table = hist_soup.find('table', {'class': 'datatable_table__D_jso'})
         
-        # Process historical data
-        df = pd.DataFrame(hist_data['data'])
-        df['date'] = pd.to_datetime(df['date'])
+        if not table:
+            raise ValueError("Historical data table not found")
+            
+        # Extract historical data
+        rows = table.find_all('tr')[1:61]  # Get last 60 days
+        dates = []
+        closes = []
+        
+        for row in rows:
+            cols = row.find_all('td')
+            dates.append(datetime.strptime(cols[0].text, '%d.%m.%Y'))
+            closes.append(float(cols[1].text.replace(',', '.')))
+            
+        # Create DataFrame
+        df = pd.DataFrame({'date': dates, 'close': closes})
         df = df.sort_values('date')
         
         # Calculate moving averages
