@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import requests
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
@@ -37,6 +38,10 @@ asyncio.set_event_loop(loop)
 
 # Create the Application
 application = Application.builder().token(BOT_TOKEN).build()
+
+# Cache for stock data
+stock_cache = {}
+CACHE_DURATION = 300  # 5 minutes
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
@@ -184,6 +189,66 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str =
         logger.error(f"Forecast error: {e}")
         await update.message.reply_text("Hava tahmini alınırken bir hata oluştu.")
 
+async def get_bist_data(symbol: str) -> dict:
+    """Get BIST stock data with caching and rate limiting."""
+    current_time = time.time()
+    
+    # Check cache first
+    if symbol in stock_cache:
+        cached_data, cache_time = stock_cache[symbol]
+        if current_time - cache_time < CACHE_DURATION:
+            return cached_data
+    
+    try:
+        # Add .IS suffix for BIST stocks
+        stock_symbol = f"{symbol}.IS"
+        stock = yf.Ticker(stock_symbol)
+        
+        # Get current data with retry mechanism
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                info = stock.info
+                hist = stock.history(period="1mo")
+                
+                if not info or hist.empty:
+                    raise ValueError("No data received")
+                
+                # Process the data
+                current_price = info.get('currentPrice', 0)
+                previous_close = info.get('previousClose', 0)
+                change_percent = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
+                
+                # Calculate technical indicators
+                sma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+                sma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+                
+                data = {
+                    'current_price': current_price,
+                    'previous_close': previous_close,
+                    'change_percent': change_percent,
+                    'sma_20': sma_20,
+                    'sma_50': sma_50
+                }
+                
+                # Update cache
+                stock_cache[symbol] = (data, current_time)
+                return data
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Attempt {attempt + 1} failed for {symbol}, retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    raise e
+                    
+    except Exception as e:
+        logger.error(f"Error fetching stock data for {symbol}: {e}")
+        return None
+
 async def hisse(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str = None) -> None:
     """Get stock information for BIST symbols."""
     if not symbol and context.args:
@@ -194,22 +259,20 @@ async def hisse(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str 
         return
 
     try:
-        # Add .IS suffix for BIST stocks
-        stock_symbol = f"{symbol}.IS"
-        stock = yf.Ticker(stock_symbol)
+        # Get stock data
+        stock_data = await get_bist_data(symbol)
         
-        # Get current data
-        info = stock.info
-        current_price = info.get('currentPrice', 0)
-        previous_close = info.get('previousClose', 0)
-        change_percent = ((current_price - previous_close) / previous_close) * 100
-        
-        # Get historical data for analysis
-        hist = stock.history(period="1mo")
-        
-        # Calculate technical indicators
-        sma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
-        sma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+        if not stock_data:
+            await update.message.reply_text(
+                "Hisse senedi verileri şu anda alınamıyor. Lütfen birkaç dakika sonra tekrar deneyin."
+            )
+            return
+            
+        current_price = stock_data['current_price']
+        previous_close = stock_data['previous_close']
+        change_percent = stock_data['change_percent']
+        sma_20 = stock_data['sma_20']
+        sma_50 = stock_data['sma_50']
         
         # Generate analysis
         analysis = []
@@ -237,7 +300,9 @@ async def hisse(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str 
         await update.message.reply_text(message)
     except Exception as e:
         logger.error(f"Stock error: {e}")
-        await update.message.reply_text("Hisse senedi bilgisi alınırken bir hata oluştu.")
+        await update.message.reply_text(
+            "Hisse senedi bilgisi alınırken bir hata oluştu. Lütfen daha sonra tekrar deneyin."
+        )
 
 @app.route("/", methods=["GET"])
 def index():
