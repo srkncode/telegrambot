@@ -42,6 +42,47 @@ application = Application.builder().token(BOT_TOKEN).build()
 stock_cache = {}
 CACHE_DURATION = 300  # 5 minutes
 
+# BIST symbol mappings for special cases
+BIST_SYMBOL_MAPPINGS = {
+    'HEKTS': 'HEKTS.IS',  # Halk Enerji
+    'SASA': 'SASA.IS',    # Sasa
+    'KCHOL': 'KCHOL.IS',  # Koç Holding
+    'GARAN': 'GARAN.IS',  # Garanti Bankası
+    'AKBNK': 'AKBNK.IS',  # Akbank
+    'ISCTR': 'ISCTR.IS',  # İş Bankası
+    'THYAO': 'THYAO.IS',  # Türk Hava Yolları
+    'EREGL': 'EREGL.IS',  # Ereğli Demir Çelik
+    'TUPRS': 'TUPRS.IS',  # Tüpraş
+    'ASELS': 'ASELS.IS',  # Aselsan
+    'KRDMD': 'KRDMD.IS',  # Kardemir
+    'PETKM': 'PETKM.IS',  # Petkim
+    'TCELL': 'TCELL.IS',  # Turkcell
+    'VESTL': 'VESTL.IS',  # Vestel
+    'BIMAS': 'BIMAS.IS',  # BİM
+    'MGROS': 'MGROS.IS',  # Migros
+    'ARCLK': 'ARCLK.IS',  # Arçelik
+    'FROTO': 'FROTO.IS',  # Ford Otosan
+    'ULKER': 'ULKER.IS',  # Ülker
+    'PGSUS': 'PGSUS.IS',  # Pegasus
+}
+
+def validate_bist_symbol(symbol: str) -> str:
+    """Validate and format BIST symbol."""
+    symbol = symbol.upper().strip()
+    
+    # Check if symbol is in mappings
+    if symbol in BIST_SYMBOL_MAPPINGS:
+        return BIST_SYMBOL_MAPPINGS[symbol]
+    
+    # Basic validation
+    if not symbol.isalpha():
+        raise ValueError("Hisse senedi sembolü sadece harflerden oluşmalıdır.")
+    
+    if len(symbol) < 3 or len(symbol) > 5:
+        raise ValueError("Hisse senedi sembolü 3-5 karakter uzunluğunda olmalıdır.")
+    
+    return f"{symbol}.IS"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
@@ -199,17 +240,22 @@ async def get_bist_data(symbol: str) -> dict:
             return cached_data
     
     try:
+        # Validate and format symbol
+        formatted_symbol = validate_bist_symbol(symbol)
+        
         # BIST API endpoints
         base_url = "https://www.borsaistanbul.com/api"
         
         # Get current price
-        price_url = f"{base_url}/marketdata/equity/{symbol}"
+        price_url = f"{base_url}/marketdata/equity/{formatted_symbol}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         
         price_response = requests.get(price_url, headers=headers)
-        if price_response.status_code != 200:
+        if price_response.status_code == 404:
+            raise ValueError(f"Hisse senedi bulunamadı: {symbol}")
+        elif price_response.status_code != 200:
             raise ValueError(f"Price API returned status code {price_response.status_code}")
             
         price_data = price_response.json()
@@ -220,7 +266,7 @@ async def get_bist_data(symbol: str) -> dict:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=60)  # Get 60 days of data for better averages
         
-        hist_url = f"{base_url}/marketdata/equity/{symbol}/historical"
+        hist_url = f"{base_url}/marketdata/equity/{formatted_symbol}/historical"
         params = {
             "startDate": start_date.strftime("%Y-%m-%d"),
             "endDate": end_date.strftime("%Y-%m-%d")
@@ -260,6 +306,9 @@ async def get_bist_data(symbol: str) -> dict:
         stock_cache[symbol] = (data, current_time)
         return data
         
+    except ValueError as e:
+        logger.error(f"Validation error for {symbol}: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error fetching stock data for {symbol}: {e}")
         return None
@@ -313,6 +362,8 @@ async def hisse(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str 
         )
         
         await update.message.reply_text(message)
+    except ValueError as e:
+        await update.message.reply_text(str(e))
     except Exception as e:
         logger.error(f"Stock error: {e}")
         await update.message.reply_text(
