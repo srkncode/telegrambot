@@ -3,7 +3,7 @@ import logging
 import asyncio
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -204,17 +204,33 @@ async def get_bist_data(symbol: str) -> dict:
         
         # Get current price
         price_url = f"{base_url}/marketdata/equity/{symbol}"
-        price_response = requests.get(price_url)
-        price_data = price_response.json()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
         
+        price_response = requests.get(price_url, headers=headers)
+        if price_response.status_code != 200:
+            raise ValueError(f"Price API returned status code {price_response.status_code}")
+            
+        price_data = price_response.json()
         if not price_data or 'data' not in price_data:
             raise ValueError("No price data received")
             
         # Get historical data
-        hist_url = f"{base_url}/marketdata/equity/{symbol}/historical"
-        hist_response = requests.get(hist_url)
-        hist_data = hist_response.json()
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=60)  # Get 60 days of data for better averages
         
+        hist_url = f"{base_url}/marketdata/equity/{symbol}/historical"
+        params = {
+            "startDate": start_date.strftime("%Y-%m-%d"),
+            "endDate": end_date.strftime("%Y-%m-%d")
+        }
+        
+        hist_response = requests.get(hist_url, headers=headers, params=params)
+        if hist_response.status_code != 200:
+            raise ValueError(f"Historical API returned status code {hist_response.status_code}")
+            
+        hist_data = hist_response.json()
         if not hist_data or 'data' not in hist_data:
             raise ValueError("No historical data received")
             
