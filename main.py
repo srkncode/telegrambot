@@ -8,6 +8,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from flask import Flask, request
 import nest_asyncio
+import yfinance as yf
+import pandas as pd
 
 # Enable nested asyncio support
 nest_asyncio.apply()
@@ -77,13 +79,35 @@ async def get_forecast(city: str) -> dict:
     response = requests.get(base_url, params=params)
     return response.json()
 
-async def hava(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming messages."""
+    text = update.message.text.lower().strip()
+    
+    if text.startswith("hava "):
+        # Remove "hava " prefix and process as weather command
+        city = text[5:].strip()
+        await hava(update, context, city)
+    elif text.startswith("tahmin "):
+        # Remove "tahmin " prefix and process as forecast command
+        city = text[7:].strip()
+        await tahmin(update, context, city)
+    elif text.startswith("hisse "):
+        # Process stock command
+        symbol = text[6:].strip().upper()
+        await hisse(update, context, symbol)
+    else:
+        # Echo other messages
+        await echo(update, context)
+
+async def hava(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str = None) -> None:
     """Send current weather information for a Turkish city."""
-    if not context.args:
-        await update.message.reply_text("Lütfen bir şehir adı girin. Örnek: /hava Istanbul")
+    if not city and context.args:
+        city = " ".join(context.args)
+    
+    if not city:
+        await update.message.reply_text("Lütfen bir şehir adı girin. Örnek: hava Istanbul")
         return
 
-    city = " ".join(context.args)
     try:
         weather_data = await get_weather(city)
         if weather_data["cod"] != 200:
@@ -112,13 +136,15 @@ async def hava(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Weather error: {e}")
         await update.message.reply_text("Hava durumu bilgisi alınırken bir hata oluştu.")
 
-async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str = None) -> None:
     """Send 5-day weather forecast for a Turkish city."""
-    if not context.args:
-        await update.message.reply_text("Lütfen bir şehir adı girin. Örnek: /tahmin Istanbul")
+    if not city and context.args:
+        city = " ".join(context.args)
+    
+    if not city:
+        await update.message.reply_text("Lütfen bir şehir adı girin. Örnek: tahmin Istanbul")
         return
 
-    city = " ".join(context.args)
     try:
         forecast_data = await get_forecast(city)
         if forecast_data["cod"] != "200":
@@ -133,27 +159,85 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             date = datetime.fromtimestamp(item["dt"]).strftime("%d.%m.%Y")
             if date not in daily_forecasts:
                 daily_forecasts[date] = {
-                    "temp_min": float('inf'),
-                    "temp_max": float('-inf'),
-                    "description": item["weather"][0]["description"]
+                    "temps": [],
+                    "descriptions": set()
                 }
             
             temp = item["main"]["temp"]
-            daily_forecasts[date]["temp_min"] = min(daily_forecasts[date]["temp_min"], temp)
-            daily_forecasts[date]["temp_max"] = max(daily_forecasts[date]["temp_max"], temp)
+            daily_forecasts[date]["temps"].append(temp)
+            daily_forecasts[date]["descriptions"].add(item["weather"][0]["description"])
 
         for date, data in daily_forecasts.items():
+            # Calculate average temperature
+            avg_temp = sum(data["temps"]) / len(data["temps"])
+            # Get most common weather description
+            main_description = max(data["descriptions"], key=data["descriptions"].count)
+            
             message += (
                 f"📅 {date}:\n"
-                f"⬆️ En yüksek: {data['temp_max']}°C\n"
-                f"⬇️ En düşük: {data['temp_min']}°C\n"
-                f"📝 Durum: {data['description'].capitalize()}\n\n"
+                f"🌡️ Ortalama Sıcaklık: {avg_temp:.1f}°C\n"
+                f"📝 Durum: {main_description.capitalize()}\n\n"
             )
         
         await update.message.reply_text(message)
     except Exception as e:
         logger.error(f"Forecast error: {e}")
         await update.message.reply_text("Hava tahmini alınırken bir hata oluştu.")
+
+async def hisse(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str = None) -> None:
+    """Get stock information for BIST symbols."""
+    if not symbol and context.args:
+        symbol = context.args[0].upper()
+    
+    if not symbol:
+        await update.message.reply_text("Lütfen bir hisse senedi sembolü girin. Örnek: hisse GARAN")
+        return
+
+    try:
+        # Add .IS suffix for BIST stocks
+        stock_symbol = f"{symbol}.IS"
+        stock = yf.Ticker(stock_symbol)
+        
+        # Get current data
+        info = stock.info
+        current_price = info.get('currentPrice', 0)
+        previous_close = info.get('previousClose', 0)
+        change_percent = ((current_price - previous_close) / previous_close) * 100
+        
+        # Get historical data for analysis
+        hist = stock.history(period="1mo")
+        
+        # Calculate technical indicators
+        sma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+        sma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+        
+        # Generate analysis
+        analysis = []
+        if current_price > sma_20 and current_price > sma_50:
+            analysis.append("📈 Kısa ve orta vadeli trend yukarı yönlü")
+        elif current_price < sma_20 and current_price < sma_50:
+            analysis.append("📉 Kısa ve orta vadeli trend aşağı yönlü")
+        else:
+            analysis.append("↔️ Trend belirsiz")
+            
+        if change_percent > 0:
+            analysis.append(f"🟢 Günlük kazanç: %{change_percent:.2f}")
+        else:
+            analysis.append(f"🔴 Günlük kayıp: %{abs(change_percent):.2f}")
+            
+        message = (
+            f"📊 {symbol} Hisse Bilgileri:\n\n"
+            f"💰 Fiyat: {current_price:.2f} TL\n"
+            f"📈 Kapanış: {previous_close:.2f} TL\n"
+            f"📊 20 Günlük Ortalama: {sma_20:.2f} TL\n"
+            f"📊 50 Günlük Ortalama: {sma_50:.2f} TL\n\n"
+            f"📝 Analiz:\n" + "\n".join(analysis)
+        )
+        
+        await update.message.reply_text(message)
+    except Exception as e:
+        logger.error(f"Stock error: {e}")
+        await update.message.reply_text("Hisse senedi bilgisi alınırken bir hata oluştu.")
 
 @app.route("/", methods=["GET"])
 def index():
@@ -183,9 +267,7 @@ async def setup():
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("hava", hava))
-    application.add_handler(CommandHandler("tahmin", tahmin))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Set webhook if RENDER_EXTERNAL_URL is provided
     webhook_url = os.getenv("RENDER_EXTERNAL_URL")
