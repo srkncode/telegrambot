@@ -12,6 +12,7 @@ import nest_asyncio
 import pandas as pd
 import json
 from bs4 import BeautifulSoup
+import http.client
 
 # Enable nested asyncio support
 nest_asyncio.apply()
@@ -245,31 +246,48 @@ async def get_bist_data(symbol: str) -> dict:
         # Validate and format symbol
         formatted_symbol = validate_bist_symbol(symbol)
         
-        # BIST API endpoints
-        base_url = "https://www.borsaistanbul.com/api"
-        
-        # Get current price and historical data
-        url = f"{base_url}/market-data/equities/{formatted_symbol}"
+        # CollectAPI configuration
+        conn = http.client.HTTPSConnection("api.collectapi.com")
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "application/json",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
+            'content-type': "application/json",
+            'authorization': f"apikey {os.getenv('COLLECTAPI_KEY')}"
         }
         
-        response = requests.get(url, headers=headers)
-        if response.status_code != 200:
-            raise ValueError(f"API yanıt kodu: {response.status_code}")
-            
-        data = response.json()
+        # Add retry mechanism
+        max_retries = 3
+        retry_delay = 1  # seconds
         
-        if not data or 'data' not in data:
+        for attempt in range(max_retries):
+            try:
+                # Get current price
+                conn.request("GET", f"/economy/hisseSenedi/{formatted_symbol}", headers=headers)
+                response = conn.getresponse()
+                
+                if response.status == 200:
+                    break
+                elif response.status == 429:  # Too Many Requests
+                    retry_after = int(response.getheader('Retry-After', retry_delay))
+                    time.sleep(retry_after)
+                    continue
+                else:
+                    raise ValueError(f"API yanıt kodu: {response.status}")
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                continue
+        
+        data = json.loads(response.read().decode("utf-8"))
+        
+        if not data or 'result' not in data:
             raise ValueError("Hisse senedi verisi bulunamadı")
             
-        stock_data = data['data']
+        stock_data = data['result']
         
         # Get current price and previous close
-        current_price = float(stock_data.get('lastPrice', 0))
-        previous_close = float(stock_data.get('previousClose', 0))
+        current_price = float(stock_data.get('lastprice', 0))
+        previous_close = float(stock_data.get('previousclose', 0))
         
         if current_price == 0 or previous_close == 0:
             raise ValueError("Fiyat bilgileri alınamadı")
@@ -278,22 +296,22 @@ async def get_bist_data(symbol: str) -> dict:
         change_percent = ((current_price - previous_close) / previous_close) * 100
         
         # Get historical data
-        hist_url = f"{base_url}/market-data/equities/{formatted_symbol}/historical"
-        hist_response = requests.get(hist_url, headers=headers)
+        conn.request("GET", f"/economy/hisseSenedi/{formatted_symbol}/historical", headers=headers)
+        hist_response = conn.getresponse()
         
-        if hist_response.status_code != 200:
-            raise ValueError(f"Geçmiş veri API yanıt kodu: {hist_response.status_code}")
+        if hist_response.status != 200:
+            raise ValueError(f"Geçmiş veri API yanıt kodu: {hist_response.status}")
             
-        hist_data = hist_response.json()
+        hist_data = json.loads(hist_response.read().decode("utf-8"))
         
-        if not hist_data or 'data' not in hist_data:
+        if not hist_data or 'result' not in hist_data:
             raise ValueError("Geçmiş veri bulunamadı")
             
         # Extract historical data
         dates = []
         closes = []
         
-        for item in hist_data['data'][:60]:  # Get last 60 days
+        for item in hist_data['result'][:60]:  # Get last 60 days
             dates.append(datetime.strptime(item['date'], '%Y-%m-%d'))
             closes.append(float(item['close']))
         
