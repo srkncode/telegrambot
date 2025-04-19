@@ -9,7 +9,6 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from flask import Flask, request
 import nest_asyncio
-import yfinance as yf
 import pandas as pd
 
 # Enable nested asyncio support
@@ -200,51 +199,51 @@ async def get_bist_data(symbol: str) -> dict:
             return cached_data
     
     try:
-        # Add .IS suffix for BIST stocks
-        stock_symbol = f"{symbol}.IS"
-        stock = yf.Ticker(stock_symbol)
+        # BIST API endpoints
+        base_url = "https://www.borsaistanbul.com/api"
         
-        # Get current data with retry mechanism
-        max_retries = 3
-        retry_delay = 2  # seconds
+        # Get current price
+        price_url = f"{base_url}/marketdata/equity/{symbol}"
+        price_response = requests.get(price_url)
+        price_data = price_response.json()
         
-        for attempt in range(max_retries):
-            try:
-                info = stock.info
-                hist = stock.history(period="1mo")
-                
-                if not info or hist.empty:
-                    raise ValueError("No data received")
-                
-                # Process the data
-                current_price = info.get('currentPrice', 0)
-                previous_close = info.get('previousClose', 0)
-                change_percent = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
-                
-                # Calculate technical indicators
-                sma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
-                sma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
-                
-                data = {
-                    'current_price': current_price,
-                    'previous_close': previous_close,
-                    'change_percent': change_percent,
-                    'sma_20': sma_20,
-                    'sma_50': sma_50
-                }
-                
-                # Update cache
-                stock_cache[symbol] = (data, current_time)
-                return data
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Attempt {attempt + 1} failed for {symbol}, retrying in {retry_delay} seconds...")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    raise e
-                    
+        if not price_data or 'data' not in price_data:
+            raise ValueError("No price data received")
+            
+        # Get historical data
+        hist_url = f"{base_url}/marketdata/equity/{symbol}/historical"
+        hist_response = requests.get(hist_url)
+        hist_data = hist_response.json()
+        
+        if not hist_data or 'data' not in hist_data:
+            raise ValueError("No historical data received")
+            
+        # Process current data
+        current_price = float(price_data['data']['last'])
+        previous_close = float(price_data['data']['previousClose'])
+        change_percent = float(price_data['data']['changePercent'])
+        
+        # Process historical data
+        df = pd.DataFrame(hist_data['data'])
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        
+        # Calculate moving averages
+        sma_20 = df['close'].rolling(window=20).mean().iloc[-1]
+        sma_50 = df['close'].rolling(window=50).mean().iloc[-1]
+        
+        data = {
+            'current_price': current_price,
+            'previous_close': previous_close,
+            'change_percent': change_percent,
+            'sma_20': sma_20,
+            'sma_50': sma_50
+        }
+        
+        # Update cache
+        stock_cache[symbol] = (data, current_time)
+        return data
+        
     except Exception as e:
         logger.error(f"Error fetching stock data for {symbol}: {e}")
         return None
