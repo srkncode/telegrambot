@@ -69,15 +69,33 @@ BIST_SYMBOL_MAPPINGS = {
     'PGSUS': 'BIST:PGSUS',  # Pegasus
 }
 
-def validate_bist_symbol(symbol: str) -> str:
-    """Validate and format BIST symbol."""
+# Cryptocurrency mappings
+CRYPTO_MAPPINGS = {
+    'BTC': 'BINANCE:BTCUSDT',  # Bitcoin
+    'ETH': 'BINANCE:ETHUSDT',  # Ethereum
+    'XRP': 'BINANCE:XRPUSDT',  # Ripple
+    'ADA': 'BINANCE:ADAUSDT',  # Cardano
+    'DOGE': 'BINANCE:DOGEUSDT',  # Dogecoin
+    'SOL': 'BINANCE:SOLUSDT',  # Solana
+    'DOT': 'BINANCE:DOTUSDT',  # Polkadot
+    'AVAX': 'BINANCE:AVAXUSDT',  # Avalanche
+    'MATIC': 'BINANCE:MATICUSDT',  # Polygon
+    'LINK': 'BINANCE:LINKUSDT',  # Chainlink
+}
+
+def validate_symbol(symbol: str) -> str:
+    """Validate and format symbol for both BIST and cryptocurrency."""
     symbol = symbol.upper().strip()
     
-    # Check if symbol is in mappings
+    # Check if symbol is in BIST mappings
     if symbol in BIST_SYMBOL_MAPPINGS:
         return BIST_SYMBOL_MAPPINGS[symbol]
     
-    # Basic validation
+    # Check if symbol is in crypto mappings
+    if symbol in CRYPTO_MAPPINGS:
+        return CRYPTO_MAPPINGS[symbol]
+    
+    # Basic validation for BIST symbols
     if not symbol.isalpha():
         raise ValueError("Hisse senedi sembolü sadece harflerden oluşmalıdır.")
     
@@ -232,8 +250,8 @@ async def tahmin(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str =
         logger.error(f"Forecast error: {e}")
         await update.message.reply_text("Hava tahmini alınırken bir hata oluştu.")
 
-async def get_bist_data(symbol: str) -> dict:
-    """Get BIST stock data with caching and rate limiting."""
+async def get_stock_data(symbol: str) -> dict:
+    """Get stock data with caching and rate limiting."""
     current_time = time.time()
     
     # Check cache first
@@ -244,7 +262,7 @@ async def get_bist_data(symbol: str) -> dict:
     
     try:
         # Validate and format symbol
-        formatted_symbol = validate_bist_symbol(symbol)
+        formatted_symbol = validate_symbol(symbol)
         
         # TradingView configuration
         base_url = "https://www.tradingview.com"
@@ -285,13 +303,19 @@ async def get_bist_data(symbol: str) -> dict:
         # Get current price
         price_element = soup.find('div', {'class': 'tv-symbol-price-quote__value'})
         if not price_element:
-            raise ValueError("Fiyat bilgisi bulunamadı")
+            # Try alternative class for crypto
+            price_element = soup.find('div', {'class': 'tv-symbol-price-quote__value js-symbol-last'})
+            if not price_element:
+                raise ValueError("Fiyat bilgisi bulunamadı")
         current_price = float(price_element.text.strip().replace(',', ''))
         
         # Get previous close
         prev_close_element = soup.find('div', {'class': 'tv-symbol-price-quote__previous-close'})
         if not prev_close_element:
-            raise ValueError("Önceki kapanış fiyatı bulunamadı")
+            # Try alternative class for crypto
+            prev_close_element = soup.find('div', {'class': 'tv-symbol-price-quote__previous-close js-symbol-prev-close'})
+            if not prev_close_element:
+                raise ValueError("Önceki kapanış fiyatı bulunamadı")
         previous_close = float(prev_close_element.text.strip().replace(',', ''))
         
         # Calculate change percent
@@ -319,8 +343,14 @@ async def get_bist_data(symbol: str) -> dict:
         for row in rows:
             cols = row.find_all('td')
             if len(cols) >= 2:
-                dates.append(datetime.strptime(cols[0].text.strip(), '%b %d, %Y'))
-                closes.append(float(cols[1].text.strip().replace(',', '')))
+                try:
+                    date_str = cols[0].text.strip()
+                    date = datetime.strptime(date_str, '%b %d, %Y')
+                    close = float(cols[1].text.strip().replace(',', ''))
+                    dates.append(date)
+                    closes.append(close)
+                except (ValueError, IndexError):
+                    continue
         
         if not dates or not closes:
             raise ValueError("Geçmiş veri bulunamadı")
@@ -353,17 +383,17 @@ async def get_bist_data(symbol: str) -> dict:
         return None
 
 async def hisse(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str = None) -> None:
-    """Get stock information for BIST symbols."""
+    """Get stock information for BIST symbols and cryptocurrencies."""
     if not symbol and context.args:
         symbol = context.args[0].upper()
     
     if not symbol:
-        await update.message.reply_text("Lütfen bir hisse senedi sembolü girin. Örnek: hisse GARAN")
+        await update.message.reply_text("Lütfen bir hisse senedi veya kripto para sembolü girin. Örnek: hisse GARAN veya hisse BTC")
         return
 
     try:
         # Get stock data
-        stock_data = await get_bist_data(symbol)
+        stock_data = await get_stock_data(symbol)
         
         if not stock_data:
             await update.message.reply_text(
@@ -392,11 +422,11 @@ async def hisse(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol: str 
             analysis.append(f"🔴 Günlük kayıp: %{abs(change_percent):.2f}")
             
         message = (
-            f"📊 {symbol} Hisse Bilgileri:\n\n"
-            f"💰 Fiyat: {current_price:.2f} TL\n"
-            f"📈 Kapanış: {previous_close:.2f} TL\n"
-            f"📊 20 Günlük Ortalama: {sma_20:.2f} TL\n"
-            f"📊 50 Günlük Ortalama: {sma_50:.2f} TL\n\n"
+            f"📊 {symbol} Bilgileri:\n\n"
+            f"💰 Fiyat: {current_price:.2f} {'TL' if symbol in BIST_SYMBOL_MAPPINGS else 'USDT'}\n"
+            f"📈 Kapanış: {previous_close:.2f} {'TL' if symbol in BIST_SYMBOL_MAPPINGS else 'USDT'}\n"
+            f"📊 20 Günlük Ortalama: {sma_20:.2f} {'TL' if symbol in BIST_SYMBOL_MAPPINGS else 'USDT'}\n"
+            f"📊 50 Günlük Ortalama: {sma_50:.2f} {'TL' if symbol in BIST_SYMBOL_MAPPINGS else 'USDT'}\n\n"
             f"📝 Analiz:\n" + "\n".join(analysis)
         )
         
