@@ -13,6 +13,8 @@ import pandas as pd
 import json
 from bs4 import BeautifulSoup
 import http.client
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
 
 # Enable nested asyncio support
 nest_asyncio.apply()
@@ -45,42 +47,42 @@ application = Application.builder().token(BOT_TOKEN).build()
 stock_cache = {}
 CACHE_DURATION = 300  # 5 minutes
 
-# BIST symbol mappings for TradingView
+# BIST symbol mappings for Binance
 BIST_SYMBOL_MAPPINGS = {
-    'HEKTS': 'BIST:HEKTS',  # Halk Enerji
-    'SASA': 'BIST:SASA',    # Sasa
-    'KCHOL': 'BIST:KCHOL',  # Koç Holding
-    'GARAN': 'BIST:GARAN',  # Garanti Bankası
-    'AKBNK': 'BIST:AKBNK',  # Akbank
-    'ISCTR': 'BIST:ISCTR',  # İş Bankası
-    'THYAO': 'BIST:THYAO',  # Türk Hava Yolları
-    'EREGL': 'BIST:EREGL',  # Ereğli Demir Çelik
-    'TUPRS': 'BIST:TUPRS',  # Tüpraş
-    'ASELS': 'BIST:ASELS',  # Aselsan
-    'KRDMD': 'BIST:KRDMD',  # Kardemir
-    'PETKM': 'BIST:PETKM',  # Petkim
-    'TCELL': 'BIST:TCELL',  # Turkcell
-    'VESTL': 'BIST:VESTL',  # Vestel
-    'BIMAS': 'BIST:BIMAS',  # BİM
-    'MGROS': 'BIST:MGROS',  # Migros
-    'ARCLK': 'BIST:ARCLK',  # Arçelik
-    'FROTO': 'BIST:FROTO',  # Ford Otosan
-    'ULKER': 'BIST:ULKER',  # Ülker
-    'PGSUS': 'BIST:PGSUS',  # Pegasus
+    'HEKTS': 'HEKTS',  # Halk Enerji
+    'SASA': 'SASA',    # Sasa
+    'KCHOL': 'KCHOL',  # Koç Holding
+    'GARAN': 'GARAN',  # Garanti Bankası
+    'AKBNK': 'AKBNK',  # Akbank
+    'ISCTR': 'ISCTR',  # İş Bankası
+    'THYAO': 'THYAO',  # Türk Hava Yolları
+    'EREGL': 'EREGL',  # Ereğli Demir Çelik
+    'TUPRS': 'TUPRS',  # Tüpraş
+    'ASELS': 'ASELS',  # Aselsan
+    'KRDMD': 'KRDMD',  # Kardemir
+    'PETKM': 'PETKM',  # Petkim
+    'TCELL': 'TCELL',  # Turkcell
+    'VESTL': 'VESTL',  # Vestel
+    'BIMAS': 'BIMAS',  # BİM
+    'MGROS': 'MGROS',  # Migros
+    'ARCLK': 'ARCLK',  # Arçelik
+    'FROTO': 'FROTO',  # Ford Otosan
+    'ULKER': 'ULKER',  # Ülker
+    'PGSUS': 'PGSUS',  # Pegasus
 }
 
 # Cryptocurrency mappings
 CRYPTO_MAPPINGS = {
-    'BTC': 'BINANCE:BTCUSDT',  # Bitcoin
-    'ETH': 'BINANCE:ETHUSDT',  # Ethereum
-    'XRP': 'BINANCE:XRPUSDT',  # Ripple
-    'ADA': 'BINANCE:ADAUSDT',  # Cardano
-    'DOGE': 'BINANCE:DOGEUSDT',  # Dogecoin
-    'SOL': 'BINANCE:SOLUSDT',  # Solana
-    'DOT': 'BINANCE:DOTUSDT',  # Polkadot
-    'AVAX': 'BINANCE:AVAXUSDT',  # Avalanche
-    'MATIC': 'BINANCE:MATICUSDT',  # Polygon
-    'LINK': 'BINANCE:LINKUSDT',  # Chainlink
+    'BTC': 'BTCUSDT',  # Bitcoin
+    'ETH': 'ETHUSDT',  # Ethereum
+    'XRP': 'XRPUSDT',  # Ripple
+    'ADA': 'ADAUSDT',  # Cardano
+    'DOGE': 'DOGEUSDT',  # Dogecoin
+    'SOL': 'SOLUSDT',  # Solana
+    'DOT': 'DOTUSDT',  # Polkadot
+    'AVAX': 'AVAXUSDT',  # Avalanche
+    'MATIC': 'MATICUSDT',  # Polygon
+    'LINK': 'LINKUSDT',  # Chainlink
 }
 
 def validate_symbol(symbol: str) -> str:
@@ -264,13 +266,8 @@ async def get_stock_data(symbol: str) -> dict:
         # Validate and format symbol
         formatted_symbol = validate_symbol(symbol)
         
-        # TradingView configuration
-        base_url = "https://www.tradingview.com"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
-        }
+        # Initialize Binance client
+        client = Client()
         
         # Add retry mechanism
         max_retries = 3
@@ -278,83 +275,52 @@ async def get_stock_data(symbol: str) -> dict:
         
         for attempt in range(max_retries):
             try:
-                # Get current price
-                url = f"{base_url}/symbols/{formatted_symbol}/"
-                response = requests.get(url, headers=headers, timeout=10)
-                
-                if response.status_code == 200:
-                    break
-                elif response.status_code == 429:  # Too Many Requests
-                    retry_after = int(response.headers.get('Retry-After', retry_delay))
-                    time.sleep(retry_after)
-                    continue
+                if symbol in CRYPTO_MAPPINGS:
+                    # Get crypto data
+                    ticker = client.get_ticker(symbol=formatted_symbol)
+                    klines = client.get_historical_klines(
+                        formatted_symbol,
+                        Client.KLINE_INTERVAL_1DAY,
+                        "60 days ago UTC"
+                    )
                 else:
-                    raise ValueError(f"API yanıt kodu: {response.status_code}")
+                    # Get BIST data
+                    ticker = client.get_ticker(symbol=f"{formatted_symbol}TRY")
+                    klines = client.get_historical_klines(
+                        f"{formatted_symbol}TRY",
+                        Client.KLINE_INTERVAL_1DAY,
+                        "60 days ago UTC"
+                    )
+                
+                if ticker and klines:
+                    break
+                    
+            except BinanceAPIException as e:
+                if attempt == max_retries - 1:
+                    raise ValueError(f"Binance API hatası: {str(e)}")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise
                 time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
+                retry_delay *= 2
                 continue
         
-        # Parse HTML response
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Process current price data
+        current_price = float(ticker['lastPrice'])
+        previous_close = float(ticker['prevClosePrice'])
+        change_percent = float(ticker['priceChangePercent'])
         
-        # Get current price
-        price_element = soup.find('div', {'class': 'tv-symbol-price-quote__value'})
-        if not price_element:
-            # Try alternative class for crypto
-            price_element = soup.find('div', {'class': 'tv-symbol-price-quote__value js-symbol-last'})
-            if not price_element:
-                raise ValueError("Fiyat bilgisi bulunamadı")
-        current_price = float(price_element.text.strip().replace(',', ''))
-        
-        # Get previous close
-        prev_close_element = soup.find('div', {'class': 'tv-symbol-price-quote__previous-close'})
-        if not prev_close_element:
-            # Try alternative class for crypto
-            prev_close_element = soup.find('div', {'class': 'tv-symbol-price-quote__previous-close js-symbol-prev-close'})
-            if not prev_close_element:
-                raise ValueError("Önceki kapanış fiyatı bulunamadı")
-        previous_close = float(prev_close_element.text.strip().replace(',', ''))
-        
-        # Calculate change percent
-        change_percent = ((current_price - previous_close) / previous_close) * 100
-        
-        # Get historical data
-        hist_url = f"{base_url}/symbols/{formatted_symbol}/historical-data/"
-        hist_response = requests.get(hist_url, headers=headers, timeout=10)
-        
-        if hist_response.status_code != 200:
-            raise ValueError(f"Geçmiş veri API yanıt kodu: {hist_response.status_code}")
-            
-        # Parse historical data
-        hist_soup = BeautifulSoup(hist_response.text, 'html.parser')
-        table = hist_soup.find('table', {'class': 'tv-data-table'})
-        
-        if not table:
-            raise ValueError("Geçmiş veri tablosu bulunamadı")
-            
-        # Extract historical data
+        # Process historical data
         dates = []
         closes = []
         
-        rows = table.find_all('tr')[1:61]  # Get last 60 days
-        for row in rows:
-            cols = row.find_all('td')
-            if len(cols) >= 2:
-                try:
-                    date_str = cols[0].text.strip()
-                    date = datetime.strptime(date_str, '%b %d, %Y')
-                    close = float(cols[1].text.strip().replace(',', ''))
-                    dates.append(date)
-                    closes.append(close)
-                except (ValueError, IndexError):
-                    continue
+        for kline in klines:
+            dates.append(datetime.fromtimestamp(kline[0]/1000))
+            closes.append(float(kline[4]))  # Close price
         
-        if not dates or not closes:
-            raise ValueError("Geçmiş veri bulunamadı")
-            
         # Create DataFrame
         df = pd.DataFrame({'date': dates, 'close': closes})
         df = df.sort_values('date')
