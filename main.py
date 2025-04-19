@@ -45,28 +45,28 @@ application = Application.builder().token(BOT_TOKEN).build()
 stock_cache = {}
 CACHE_DURATION = 300  # 5 minutes
 
-# BIST symbol mappings
+# BIST symbol mappings for TradingView
 BIST_SYMBOL_MAPPINGS = {
-    'HEKTS': 'HEKTS',  # Halk Enerji
-    'SASA': 'SASA',    # Sasa
-    'KCHOL': 'KCHOL',  # Koç Holding
-    'GARAN': 'GARAN',  # Garanti Bankası
-    'AKBNK': 'AKBNK',  # Akbank
-    'ISCTR': 'ISCTR',  # İş Bankası
-    'THYAO': 'THYAO',  # Türk Hava Yolları
-    'EREGL': 'EREGL',  # Ereğli Demir Çelik
-    'TUPRS': 'TUPRS',  # Tüpraş
-    'ASELS': 'ASELS',  # Aselsan
-    'KRDMD': 'KRDMD',  # Kardemir
-    'PETKM': 'PETKM',  # Petkim
-    'TCELL': 'TCELL',  # Turkcell
-    'VESTL': 'VESTL',  # Vestel
-    'BIMAS': 'BIMAS',  # BİM
-    'MGROS': 'MGROS',  # Migros
-    'ARCLK': 'ARCLK',  # Arçelik
-    'FROTO': 'FROTO',  # Ford Otosan
-    'ULKER': 'ULKER',  # Ülker
-    'PGSUS': 'PGSUS',  # Pegasus
+    'HEKTS': 'BIST:HEKTS',  # Halk Enerji
+    'SASA': 'BIST:SASA',    # Sasa
+    'KCHOL': 'BIST:KCHOL',  # Koç Holding
+    'GARAN': 'BIST:GARAN',  # Garanti Bankası
+    'AKBNK': 'BIST:AKBNK',  # Akbank
+    'ISCTR': 'BIST:ISCTR',  # İş Bankası
+    'THYAO': 'BIST:THYAO',  # Türk Hava Yolları
+    'EREGL': 'BIST:EREGL',  # Ereğli Demir Çelik
+    'TUPRS': 'BIST:TUPRS',  # Tüpraş
+    'ASELS': 'BIST:ASELS',  # Aselsan
+    'KRDMD': 'BIST:KRDMD',  # Kardemir
+    'PETKM': 'BIST:PETKM',  # Petkim
+    'TCELL': 'BIST:TCELL',  # Turkcell
+    'VESTL': 'BIST:VESTL',  # Vestel
+    'BIMAS': 'BIST:BIMAS',  # BİM
+    'MGROS': 'BIST:MGROS',  # Migros
+    'ARCLK': 'BIST:ARCLK',  # Arçelik
+    'FROTO': 'BIST:FROTO',  # Ford Otosan
+    'ULKER': 'BIST:ULKER',  # Ülker
+    'PGSUS': 'BIST:PGSUS',  # Pegasus
 }
 
 def validate_bist_symbol(symbol: str) -> str:
@@ -246,11 +246,12 @@ async def get_bist_data(symbol: str) -> dict:
         # Validate and format symbol
         formatted_symbol = validate_bist_symbol(symbol)
         
-        # CollectAPI configuration
-        conn = http.client.HTTPSConnection("api.collectapi.com")
+        # TradingView configuration
+        base_url = "https://www.tradingview.com"
         headers = {
-            'content-type': "application/json",
-            'authorization': f"apikey {os.getenv('COLLECTAPI_KEY')}"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
         }
         
         # Add retry mechanism
@@ -260,17 +261,17 @@ async def get_bist_data(symbol: str) -> dict:
         for attempt in range(max_retries):
             try:
                 # Get current price
-                conn.request("GET", f"/economy/hisseSenedi/{formatted_symbol}", headers=headers)
-                response = conn.getresponse()
+                url = f"{base_url}/symbols/{formatted_symbol}/"
+                response = requests.get(url, headers=headers, timeout=10)
                 
-                if response.status == 200:
+                if response.status_code == 200:
                     break
-                elif response.status == 429:  # Too Many Requests
-                    retry_after = int(response.getheader('Retry-After', retry_delay))
+                elif response.status_code == 429:  # Too Many Requests
+                    retry_after = int(response.headers.get('Retry-After', retry_delay))
                     time.sleep(retry_after)
                     continue
                 else:
-                    raise ValueError(f"API yanıt kodu: {response.status}")
+                    raise ValueError(f"API yanıt kodu: {response.status_code}")
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise
@@ -278,42 +279,48 @@ async def get_bist_data(symbol: str) -> dict:
                 retry_delay *= 2  # Exponential backoff
                 continue
         
-        data = json.loads(response.read().decode("utf-8"))
+        # Parse HTML response
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        if not data or 'result' not in data:
-            raise ValueError("Hisse senedi verisi bulunamadı")
-            
-        stock_data = data['result']
+        # Get current price
+        price_element = soup.find('div', {'class': 'tv-symbol-price-quote__value'})
+        if not price_element:
+            raise ValueError("Fiyat bilgisi bulunamadı")
+        current_price = float(price_element.text.strip().replace(',', ''))
         
-        # Get current price and previous close
-        current_price = float(stock_data.get('lastprice', 0))
-        previous_close = float(stock_data.get('previousclose', 0))
-        
-        if current_price == 0 or previous_close == 0:
-            raise ValueError("Fiyat bilgileri alınamadı")
+        # Get previous close
+        prev_close_element = soup.find('div', {'class': 'tv-symbol-price-quote__previous-close'})
+        if not prev_close_element:
+            raise ValueError("Önceki kapanış fiyatı bulunamadı")
+        previous_close = float(prev_close_element.text.strip().replace(',', ''))
         
         # Calculate change percent
         change_percent = ((current_price - previous_close) / previous_close) * 100
         
         # Get historical data
-        conn.request("GET", f"/economy/hisseSenedi/{formatted_symbol}/historical", headers=headers)
-        hist_response = conn.getresponse()
+        hist_url = f"{base_url}/symbols/{formatted_symbol}/historical-data/"
+        hist_response = requests.get(hist_url, headers=headers, timeout=10)
         
-        if hist_response.status != 200:
-            raise ValueError(f"Geçmiş veri API yanıt kodu: {hist_response.status}")
+        if hist_response.status_code != 200:
+            raise ValueError(f"Geçmiş veri API yanıt kodu: {hist_response.status_code}")
             
-        hist_data = json.loads(hist_response.read().decode("utf-8"))
+        # Parse historical data
+        hist_soup = BeautifulSoup(hist_response.text, 'html.parser')
+        table = hist_soup.find('table', {'class': 'tv-data-table'})
         
-        if not hist_data or 'result' not in hist_data:
-            raise ValueError("Geçmiş veri bulunamadı")
+        if not table:
+            raise ValueError("Geçmiş veri tablosu bulunamadı")
             
         # Extract historical data
         dates = []
         closes = []
         
-        for item in hist_data['result'][:60]:  # Get last 60 days
-            dates.append(datetime.strptime(item['date'], '%Y-%m-%d'))
-            closes.append(float(item['close']))
+        rows = table.find_all('tr')[1:61]  # Get last 60 days
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 2:
+                dates.append(datetime.strptime(cols[0].text.strip(), '%b %d, %Y'))
+                closes.append(float(cols[1].text.strip().replace(',', '')))
         
         if not dates or not closes:
             raise ValueError("Geçmiş veri bulunamadı")
