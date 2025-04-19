@@ -44,28 +44,28 @@ application = Application.builder().token(BOT_TOKEN).build()
 stock_cache = {}
 CACHE_DURATION = 300  # 5 minutes
 
-# BIST symbol mappings for Investing.com
+# BIST symbol mappings
 BIST_SYMBOL_MAPPINGS = {
-    'HEKTS': 'halk-enerji',  # Halk Enerji
-    'SASA': 'sasa-polyester',  # Sasa
-    'KCHOL': 'koc-holding',  # Koç Holding
-    'GARAN': 'garanti-bankasi',  # Garanti Bankası
-    'AKBNK': 'akbank',  # Akbank
-    'ISCTR': 'is-bankasi',  # İş Bankası
-    'THYAO': 'turk-hava-yollari',  # Türk Hava Yolları
-    'EREGL': 'eregli-demir-celik',  # Ereğli Demir Çelik
-    'TUPRS': 'tupras',  # Tüpraş
-    'ASELS': 'aselsan',  # Aselsan
-    'KRDMD': 'kardemir',  # Kardemir
-    'PETKM': 'petkim',  # Petkim
-    'TCELL': 'turkcell',  # Turkcell
-    'VESTL': 'vestel',  # Vestel
-    'BIMAS': 'bim',  # BİM
-    'MGROS': 'migros',  # Migros
-    'ARCLK': 'arcelik',  # Arçelik
-    'FROTO': 'ford-otosan',  # Ford Otosan
-    'ULKER': 'ulker',  # Ülker
-    'PGSUS': 'pegasus',  # Pegasus
+    'HEKTS': 'HEKTS',  # Halk Enerji
+    'SASA': 'SASA',    # Sasa
+    'KCHOL': 'KCHOL',  # Koç Holding
+    'GARAN': 'GARAN',  # Garanti Bankası
+    'AKBNK': 'AKBNK',  # Akbank
+    'ISCTR': 'ISCTR',  # İş Bankası
+    'THYAO': 'THYAO',  # Türk Hava Yolları
+    'EREGL': 'EREGL',  # Ereğli Demir Çelik
+    'TUPRS': 'TUPRS',  # Tüpraş
+    'ASELS': 'ASELS',  # Aselsan
+    'KRDMD': 'KRDMD',  # Kardemir
+    'PETKM': 'PETKM',  # Petkim
+    'TCELL': 'TCELL',  # Turkcell
+    'VESTL': 'VESTL',  # Vestel
+    'BIMAS': 'BIMAS',  # BİM
+    'MGROS': 'MGROS',  # Migros
+    'ARCLK': 'ARCLK',  # Arçelik
+    'FROTO': 'FROTO',  # Ford Otosan
+    'ULKER': 'ULKER',  # Ülker
+    'PGSUS': 'PGSUS',  # Pegasus
 }
 
 def validate_bist_symbol(symbol: str) -> str:
@@ -245,14 +245,14 @@ async def get_bist_data(symbol: str) -> dict:
         # Validate and format symbol
         formatted_symbol = validate_bist_symbol(symbol)
         
-        # Investing.com API endpoints
-        base_url = "https://www.investing.com/equities"
+        # BIST website endpoints
+        base_url = "https://www.borsaistanbul.com"
         
         # Get current price
-        price_url = f"{base_url}/{formatted_symbol}"
+        price_url = f"{base_url}/tr/tr/endeksler/hisse-senetleri-piyasasi/hisse-senetleri-detay/{formatted_symbol}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "application/json",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
         }
         
@@ -264,17 +264,22 @@ async def get_bist_data(symbol: str) -> dict:
         soup = BeautifulSoup(price_response.text, 'html.parser')
         
         # Get current price
-        current_price = float(soup.find('span', {'class': 'text-2xl'}).text.replace(',', '.'))
+        price_element = soup.find('span', {'class': 'last-price'})
+        if not price_element:
+            raise ValueError("Fiyat bilgisi bulunamadı")
+        current_price = float(price_element.text.replace(',', '.'))
         
         # Get previous close
-        previous_close = float(soup.find('div', {'class': 'flex flex-wrap gap-x-4 gap-y-2'})
-                             .find_all('span')[1].text.replace(',', '.'))
+        prev_close_element = soup.find('span', {'class': 'previous-close'})
+        if not prev_close_element:
+            raise ValueError("Önceki kapanış fiyatı bulunamadı")
+        previous_close = float(prev_close_element.text.replace(',', '.'))
         
         # Calculate change percent
         change_percent = ((current_price - previous_close) / previous_close) * 100
         
         # Get historical data
-        hist_url = f"{base_url}/{formatted_symbol}-historical-data"
+        hist_url = f"{base_url}/tr/tr/endeksler/hisse-senetleri-piyasasi/hisse-senetleri-detay/{formatted_symbol}/fiyat-grafigi"
         hist_response = requests.get(hist_url, headers=headers)
         
         if hist_response.status_code != 200:
@@ -282,10 +287,10 @@ async def get_bist_data(symbol: str) -> dict:
             
         # Parse historical data
         hist_soup = BeautifulSoup(hist_response.text, 'html.parser')
-        table = hist_soup.find('table', {'class': 'datatable_table__D_jso'})
+        table = hist_soup.find('table', {'class': 'table'})
         
         if not table:
-            raise ValueError("Historical data table not found")
+            raise ValueError("Geçmiş veri tablosu bulunamadı")
             
         # Extract historical data
         rows = table.find_all('tr')[1:61]  # Get last 60 days
@@ -294,8 +299,12 @@ async def get_bist_data(symbol: str) -> dict:
         
         for row in rows:
             cols = row.find_all('td')
-            dates.append(datetime.strptime(cols[0].text, '%d.%m.%Y'))
-            closes.append(float(cols[1].text.replace(',', '.')))
+            if len(cols) >= 2:
+                dates.append(datetime.strptime(cols[0].text.strip(), '%d.%m.%Y'))
+                closes.append(float(cols[1].text.strip().replace(',', '.')))
+        
+        if not dates or not closes:
+            raise ValueError("Geçmiş veri bulunamadı")
             
         # Create DataFrame
         df = pd.DataFrame({'date': dates, 'close': closes})
