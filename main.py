@@ -245,63 +245,57 @@ async def get_bist_data(symbol: str) -> dict:
         # Validate and format symbol
         formatted_symbol = validate_bist_symbol(symbol)
         
-        # BIST website endpoints
-        base_url = "https://www.borsaistanbul.com"
+        # BIST API endpoints
+        base_url = "https://www.borsaistanbul.com/api"
         
-        # Get current price
-        price_url = f"{base_url}/tr/tr/endeksler/hisse-senetleri-piyasasi/hisse-senetleri-detay/{formatted_symbol}"
+        # Get current price and historical data
+        url = f"{base_url}/market-data/equities/{formatted_symbol}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept": "application/json",
             "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
         }
         
-        price_response = requests.get(price_url, headers=headers)
-        if price_response.status_code != 200:
-            raise ValueError(f"Price API returned status code {price_response.status_code}")
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            raise ValueError(f"API yanıt kodu: {response.status_code}")
             
-        # Parse HTML response
-        soup = BeautifulSoup(price_response.text, 'html.parser')
+        data = response.json()
         
-        # Get current price
-        price_element = soup.find('span', {'class': 'last-price'})
-        if not price_element:
-            raise ValueError("Fiyat bilgisi bulunamadı")
-        current_price = float(price_element.text.replace(',', '.'))
+        if not data or 'data' not in data:
+            raise ValueError("Hisse senedi verisi bulunamadı")
+            
+        stock_data = data['data']
         
-        # Get previous close
-        prev_close_element = soup.find('span', {'class': 'previous-close'})
-        if not prev_close_element:
-            raise ValueError("Önceki kapanış fiyatı bulunamadı")
-        previous_close = float(prev_close_element.text.replace(',', '.'))
+        # Get current price and previous close
+        current_price = float(stock_data.get('lastPrice', 0))
+        previous_close = float(stock_data.get('previousClose', 0))
+        
+        if current_price == 0 or previous_close == 0:
+            raise ValueError("Fiyat bilgileri alınamadı")
         
         # Calculate change percent
         change_percent = ((current_price - previous_close) / previous_close) * 100
         
         # Get historical data
-        hist_url = f"{base_url}/tr/tr/endeksler/hisse-senetleri-piyasasi/hisse-senetleri-detay/{formatted_symbol}/fiyat-grafigi"
+        hist_url = f"{base_url}/market-data/equities/{formatted_symbol}/historical"
         hist_response = requests.get(hist_url, headers=headers)
         
         if hist_response.status_code != 200:
-            raise ValueError(f"Historical API returned status code {hist_response.status_code}")
+            raise ValueError(f"Geçmiş veri API yanıt kodu: {hist_response.status_code}")
             
-        # Parse historical data
-        hist_soup = BeautifulSoup(hist_response.text, 'html.parser')
-        table = hist_soup.find('table', {'class': 'table'})
+        hist_data = hist_response.json()
         
-        if not table:
-            raise ValueError("Geçmiş veri tablosu bulunamadı")
+        if not hist_data or 'data' not in hist_data:
+            raise ValueError("Geçmiş veri bulunamadı")
             
         # Extract historical data
-        rows = table.find_all('tr')[1:61]  # Get last 60 days
         dates = []
         closes = []
         
-        for row in rows:
-            cols = row.find_all('td')
-            if len(cols) >= 2:
-                dates.append(datetime.strptime(cols[0].text.strip(), '%d.%m.%Y'))
-                closes.append(float(cols[1].text.strip().replace(',', '.')))
+        for item in hist_data['data'][:60]:  # Get last 60 days
+            dates.append(datetime.strptime(item['date'], '%Y-%m-%d'))
+            closes.append(float(item['close']))
         
         if not dates or not closes:
             raise ValueError("Geçmiş veri bulunamadı")
