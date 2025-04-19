@@ -134,26 +134,33 @@ async def get_gold_data() -> dict:
         from xml.etree import ElementTree
         root = ElementTree.fromstring(response.content)
         
+        # Get USD rate for gram gold calculation
+        usd_buying = float(root.find(".//Currency[@Kod='USD']/BanknoteBuying").text)
+        
+        # Calculate gram gold price (1 gram = 31.1035 grams)
+        gram_gold_usd = 31.1035  # 1 troy ounce in grams
+        gram_gold_try = gram_gold_usd * usd_buying
+        
         data = {
             'gram': {
                 'name': 'Gram Altın',
-                'buying': float(root.find(".//Currency[@Kod='GA']/BanknoteBuying").text),
-                'selling': float(root.find(".//Currency[@Kod='GA']/BanknoteSelling").text)
+                'buying': gram_gold_try,
+                'selling': gram_gold_try * 1.01  # Add 1% spread
             },
             'ceyrek': {
                 'name': 'Çeyrek Altın',
-                'buying': float(root.find(".//Currency[@Kod='C']/BanknoteBuying").text),
-                'selling': float(root.find(".//Currency[@Kod='C']/BanknoteSelling").text)
+                'buying': gram_gold_try * 1.75,  # 1.75 grams
+                'selling': gram_gold_try * 1.75 * 1.01
             },
             'yarim': {
                 'name': 'Yarım Altın',
-                'buying': float(root.find(".//Currency[@Kod='Y']/BanknoteBuying").text),
-                'selling': float(root.find(".//Currency[@Kod='Y']/BanknoteSelling").text)
+                'buying': gram_gold_try * 3.5,  # 3.5 grams
+                'selling': gram_gold_try * 3.5 * 1.01
             },
             'tam': {
                 'name': 'Tam Altın',
-                'buying': float(root.find(".//Currency[@Kod='T']/BanknoteBuying").text),
-                'selling': float(root.find(".//Currency[@Kod='T']/BanknoteSelling").text)
+                'buying': gram_gold_try * 7,  # 7 grams
+                'selling': gram_gold_try * 7 * 1.01
             }
         }
         
@@ -178,6 +185,9 @@ async def get_weather(city: str) -> dict:
     
     try:
         api_key = os.getenv("OPENWEATHER_API_KEY")
+        if not api_key:
+            raise ValueError("OpenWeather API anahtarı bulunamadı")
+            
         base_url = "http://api.openweathermap.org/data/2.5/weather"
         params = {
             "q": f"{city},TR",  # Add TR for Turkey
@@ -185,10 +195,15 @@ async def get_weather(city: str) -> dict:
             "units": "metric",
             "lang": "tr"
         }
-        response = requests.get(base_url, params=params)
+        
+        response = requests.get(base_url, params=params, timeout=10)
         
         if response.status_code != 200:
-            raise ValueError("Hava durumu bilgisi alınamadı")
+            error_data = response.json()
+            if error_data.get('cod') == '404':
+                raise ValueError(f"Şehir bulunamadı: {city}")
+            else:
+                raise ValueError(f"Hava durumu bilgisi alınamadı: {error_data.get('message', 'Bilinmeyen hata')}")
         
         data = response.json()
         
@@ -247,6 +262,8 @@ async def altin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"Satış: {data['selling']:.2f} TL\n\n"
             )
         
+        message += "ℹ️ Not: Fiyatlar yaklaşık değerlerdir ve güncel piyasa koşullarına göre değişebilir."
+        
         await update.message.reply_text(message)
     except Exception as e:
         logger.error(f"Gold error: {e}")
@@ -278,6 +295,7 @@ async def hava(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str = N
         temp_max = weather_data["main"]["temp_max"]
         humidity = weather_data["main"]["humidity"]
         description = weather_data["weather"][0]["description"].capitalize()
+        wind_speed = weather_data["wind"]["speed"]
         
         message = (
             f"🌤️ {city} için anlık hava durumu:\n\n"
@@ -286,10 +304,13 @@ async def hava(update: Update, context: ContextTypes.DEFAULT_TYPE, city: str = N
             f"⬆️ En yüksek: {temp_max}°C\n"
             f"⬇️ En düşük: {temp_min}°C\n"
             f"💧 Nem: {humidity}%\n"
+            f"💨 Rüzgar: {wind_speed} m/s\n"
             f"📝 Durum: {description}"
         )
         
         await update.message.reply_text(message)
+    except ValueError as e:
+        await update.message.reply_text(str(e))
     except Exception as e:
         logger.error(f"Weather error: {e}")
         await update.message.reply_text(
